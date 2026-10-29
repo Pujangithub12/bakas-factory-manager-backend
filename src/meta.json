@@ -1,0 +1,1990 @@
+{
+ "person": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "full_name": {
+    "type": "text",
+    "opt": false
+   },
+   "mobile": {
+    "type": "text",
+    "opt": true
+   },
+   "address": {
+    "type": "text",
+    "opt": true
+   },
+   "id_no": {
+    "type": "text",
+    "opt": true
+   },
+   "active": {
+    "type": "bool",
+    "opt": false
+   },
+   "checked": {
+    "type": "bool",
+    "opt": false
+   },
+   "registered_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "registered_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "checked_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "checked_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "pin_hash": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "person_role": {
+  "phase": 1,
+  "pk": [
+   "person_id",
+   "role"
+  ],
+  "cols": {
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "role": {
+    "type": "text",
+    "opt": false
+   },
+   "is_main": {
+    "type": "bool",
+    "opt": false
+   }
+  }
+ },
+ "operator_machine": {
+  "phase": 1,
+  "pk": [
+   "person_id",
+   "machine_id"
+  ],
+  "cols": {
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   }
+  }
+ },
+ "shift": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "starts": {
+    "type": "time",
+    "opt": false
+   },
+   "ends": {
+    "type": "time",
+    "opt": false
+   }
+  }
+ },
+ "attendance": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "shift_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "shift"
+   },
+   "shift_start": {
+    "type": "ts",
+    "opt": false
+   },
+   "gate_in": {
+    "type": "ts",
+    "opt": true
+   },
+   "gate_out": {
+    "type": "ts",
+    "opt": true
+   },
+   "gate_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "on_duty_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "on_duty_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   }
+  }
+ },
+ "shift_in_charge": {
+  "phase": 1,
+  "pk": [
+   "shift_start"
+  ],
+  "cols": {
+   "shift_start": {
+    "type": "ts",
+    "opt": false
+   },
+   "shift_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "shift"
+   },
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "set_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "set_at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "visitor": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "pass_no": {
+    "type": "text",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "mobile": {
+    "type": "text",
+    "opt": true
+   },
+   "from_org": {
+    "type": "text",
+    "opt": true
+   },
+   "purpose": {
+    "type": "text",
+    "opt": false
+   },
+   "meet_person_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "people_count": {
+    "type": "int",
+    "opt": true
+   },
+   "vehicle_no": {
+    "type": "text",
+    "opt": true
+   },
+   "id_doc": {
+    "type": "text",
+    "opt": true
+   },
+   "carrying": {
+    "type": "text",
+    "opt": true
+   },
+   "time_in": {
+    "type": "ts",
+    "opt": false
+   },
+   "time_out": {
+    "type": "ts",
+    "opt": true
+   },
+   "pass_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "out_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   }
+  }
+ },
+ "machine": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "tag": {
+    "type": "text",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "make_model": {
+    "type": "text",
+    "opt": true
+   },
+   "stage": {
+    "type": "text",
+    "opt": false
+   },
+   "rated_capacity": {
+    "type": "text",
+    "opt": true
+   },
+   "motor_kw": {
+    "type": "num7.1",
+    "opt": true
+   },
+   "hour_meter_start": {
+    "type": "num9.1",
+    "opt": true
+   },
+   "hour_meter_start_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "wear_part": {
+    "type": "text",
+    "opt": true
+   },
+   "wear_limit_t": {
+    "type": "num7.1",
+    "opt": true
+   },
+   "notes": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "stop_reason": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "type": {
+    "type": "text",
+    "opt": false
+   },
+   "machine_down": {
+    "type": "bool",
+    "opt": false
+   },
+   "calls_maintenance": {
+    "type": "bool",
+    "opt": false
+   }
+  }
+ },
+ "log_field": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "stage": {
+    "type": "text",
+    "opt": false
+   },
+   "kind": {
+    "type": "text",
+    "opt": false
+   },
+   "field_key": {
+    "type": "text",
+    "opt": false
+   },
+   "label": {
+    "type": "text",
+    "opt": false
+   },
+   "unit": {
+    "type": "text",
+    "opt": true
+   },
+   "required": {
+    "type": "bool",
+    "opt": false
+   },
+   "sort": {
+    "type": "int",
+    "opt": false
+   }
+  }
+ },
+ "machine_run": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "operator_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "started_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "stopped_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "stop_reason_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "stop_reason"
+   },
+   "notes": {
+    "type": "text",
+    "opt": true
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "run_helper": {
+  "phase": 1,
+  "pk": [
+   "run_id",
+   "person_id"
+  ],
+  "cols": {
+   "run_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine_run"
+   },
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "prestart_answer": {
+  "phase": 1,
+  "pk": [
+   "run_id",
+   "field_id"
+  ],
+  "cols": {
+   "run_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine_run"
+   },
+   "field_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "log_field"
+   },
+   "answer": {
+    "type": "bool",
+    "opt": false
+   }
+  }
+ },
+ "run_bypass": {
+  "phase": 1,
+  "pk": [
+   "run_id"
+  ],
+  "cols": {
+   "run_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine_run"
+   },
+   "remark": {
+    "type": "text",
+    "opt": false
+   },
+   "job_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "maintenance_job"
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "downtime": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "started_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "ended_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "stop_reason_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "stop_reason"
+   },
+   "notes": {
+    "type": "text",
+    "opt": true
+   },
+   "job_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "maintenance_job"
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "log_reading": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "run_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "machine_run"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "vals": {
+    "type": "json",
+    "opt": false
+   },
+   "one_min_kg": {
+    "type": "num7.2",
+    "opt": true
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "greasing_check": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "shift_start": {
+    "type": "ts",
+    "opt": false
+   },
+   "vals": {
+    "type": "json",
+    "opt": false
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "bag_count": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "product_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "period_from": {
+    "type": "ts",
+    "opt": false
+   },
+   "period_to": {
+    "type": "ts",
+    "opt": false
+   },
+   "bags": {
+    "type": "int",
+    "opt": false
+   },
+   "kg_per_bag": {
+    "type": "num5.1",
+    "opt": false
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "entered_at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "maintenance_job": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "kind": {
+    "type": "text",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "problem": {
+    "type": "text",
+    "opt": false
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   },
+   "when_needed": {
+    "type": "text",
+    "opt": true
+   },
+   "reported_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "reported_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "machine_stopped": {
+    "type": "bool",
+    "opt": false
+   },
+   "downtime_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "downtime"
+   },
+   "fitter_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "started_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "fixed_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "work_done": {
+    "type": "text",
+    "opt": true
+   },
+   "parts_used": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "pm_task": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "equipment": {
+    "type": "text",
+    "opt": false
+   },
+   "component": {
+    "type": "text",
+    "opt": false
+   },
+   "task": {
+    "type": "text",
+    "opt": false
+   },
+   "every_hours": {
+    "type": "num8.1",
+    "opt": true
+   },
+   "every_days": {
+    "type": "int",
+    "opt": true
+   },
+   "counts": {
+    "type": "text",
+    "opt": true
+   },
+   "lubricant": {
+    "type": "text",
+    "opt": true
+   },
+   "source": {
+    "type": "text",
+    "opt": true
+   },
+   "operator_can_do": {
+    "type": "bool",
+    "opt": false
+   }
+  }
+ },
+ "pm_done": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "task_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "pm_task"
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "done_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "hour_meter": {
+    "type": "num9.1",
+    "opt": true
+   },
+   "minutes": {
+    "type": "int",
+    "opt": true
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "hour_meter_reading": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "machine_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "machine"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "hours": {
+    "type": "num9.1",
+    "opt": false
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "vehicle": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "type": {
+    "type": "text",
+    "opt": false
+   },
+   "reg_no": {
+    "type": "text",
+    "opt": true
+   },
+   "meter": {
+    "type": "text",
+    "opt": false
+   }
+  }
+ },
+ "driver_vehicle": {
+  "phase": 2,
+  "pk": [
+   "person_id",
+   "vehicle_id"
+  ],
+  "cols": {
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "vehicle_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "vehicle"
+   }
+  }
+ },
+ "vehicle_session": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "vehicle_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "vehicle"
+   },
+   "driver_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "started_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "stopped_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "meter_start": {
+    "type": "num9.1",
+    "opt": true
+   },
+   "meter_end": {
+    "type": "num9.1",
+    "opt": true
+   },
+   "job": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "diesel_fill": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "vehicle_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "vehicle"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "litres": {
+    "type": "num7.1",
+    "opt": false
+   },
+   "meter": {
+    "type": "num9.1",
+    "opt": true
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "power_reading": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "kwh_meter": {
+    "type": "num12.1",
+    "opt": false
+   },
+   "load_kw": {
+    "type": "num7.1",
+    "opt": true
+   },
+   "power_factor": {
+    "type": "num3.2",
+    "opt": true
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   }
+  }
+ },
+ "material": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "kind": {
+    "type": "text",
+    "opt": false
+   },
+   "feed_stage": {
+    "type": "text",
+    "opt": true
+   },
+   "bag_kg": {
+    "type": "num5.1",
+    "opt": true
+   },
+   "notes": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "supplier": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "phone": {
+    "type": "text",
+    "opt": true
+   },
+   "address": {
+    "type": "text",
+    "opt": true
+   },
+   "pan": {
+    "type": "text",
+    "opt": true
+   },
+   "usually_supplies": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "buyer": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "phone": {
+    "type": "text",
+    "opt": true
+   },
+   "address": {
+    "type": "text",
+    "opt": true
+   },
+   "pan_vat": {
+    "type": "text",
+    "opt": true
+   },
+   "products": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "yard": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "letter": {
+    "type": "text",
+    "opt": false
+   },
+   "holds_trucks": {
+    "type": "int",
+    "opt": true
+   }
+  }
+ },
+ "yard_batch": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "yard_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "yard"
+   },
+   "seq": {
+    "type": "int",
+    "opt": false
+   },
+   "opened_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "closed_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "started_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "finished_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "started_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "finished_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   }
+  }
+ },
+ "weigh_ticket": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "wbsn": {
+    "type": "int",
+    "opt": false
+   },
+   "direction": {
+    "type": "text",
+    "opt": false
+   },
+   "vehicle_type": {
+    "type": "text",
+    "opt": true
+   },
+   "vehicle_no": {
+    "type": "text",
+    "opt": false
+   },
+   "driver_name": {
+    "type": "text",
+    "opt": true
+   },
+   "driver_contact": {
+    "type": "text",
+    "opt": true
+   },
+   "supplier_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "supplier"
+   },
+   "buyer_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "buyer"
+   },
+   "material_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "first_kg": {
+    "type": "int",
+    "opt": false
+   },
+   "first_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "second_kg": {
+    "type": "int",
+    "opt": true
+   },
+   "second_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "moisture_1": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "moisture_2": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "moisture_3": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "batch_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "yard_batch"
+   },
+   "challan_no": {
+    "type": "text",
+    "opt": true
+   },
+   "po_no": {
+    "type": "text",
+    "opt": true
+   },
+   "vcts_no": {
+    "type": "text",
+    "opt": true
+   },
+   "remarks": {
+    "type": "text",
+    "opt": true
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "out_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   }
+  }
+ },
+ "opening_stock": {
+  "phase": 1,
+  "pk": [
+   "product_id",
+   "as_of"
+  ],
+  "cols": {
+   "product_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "as_of": {
+    "type": "ts",
+    "opt": false
+   },
+   "kg": {
+    "type": "int",
+    "opt": false
+   }
+  }
+ },
+ "store_item": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "kind": {
+    "type": "text",
+    "opt": false
+   },
+   "code": {
+    "type": "text",
+    "opt": true
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "unit": {
+    "type": "text",
+    "opt": false
+   },
+   "qty": {
+    "type": "num10.2",
+    "opt": false
+   },
+   "min_qty": {
+    "type": "num10.2",
+    "opt": true
+   },
+   "rate": {
+    "type": "num12.2",
+    "opt": true
+   },
+   "location": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "store_movement": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "item_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "store_item"
+   },
+   "type": {
+    "type": "text",
+    "opt": false
+   },
+   "qty": {
+    "type": "num10.2",
+    "opt": false
+   },
+   "to_person_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "due_back": {
+    "type": "ts",
+    "opt": true
+   },
+   "returned_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "condition": {
+    "type": "text",
+    "opt": true
+   },
+   "returned_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   },
+   "job_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "maintenance_job"
+   },
+   "task_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "pm_task"
+   },
+   "pr_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "purchase_request"
+   }
+  }
+ },
+ "purchase_request": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "pr_no": {
+    "type": "text",
+    "opt": false
+   },
+   "requested_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "requested_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "reason": {
+    "type": "text",
+    "opt": true
+   },
+   "need_by": {
+    "type": "date",
+    "opt": true
+   },
+   "priority": {
+    "type": "text",
+    "opt": false
+   },
+   "status": {
+    "type": "text",
+    "opt": false
+   },
+   "approved_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "approved_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "reject_reason": {
+    "type": "text",
+    "opt": true
+   },
+   "ordered_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "ordered_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "vendor": {
+    "type": "text",
+    "opt": true
+   },
+   "expected_on": {
+    "type": "date",
+    "opt": true
+   },
+   "amount": {
+    "type": "num12.2",
+    "opt": true
+   },
+   "received_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "received_at": {
+    "type": "ts",
+    "opt": true
+   }
+  }
+ },
+ "purchase_request_line": {
+  "phase": 2,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "pr_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "purchase_request"
+   },
+   "item_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "store_item"
+   },
+   "description": {
+    "type": "text",
+    "opt": true
+   },
+   "qty": {
+    "type": "num10.2",
+    "opt": false
+   },
+   "unit": {
+    "type": "text",
+    "opt": true
+   }
+  }
+ },
+ "setting": {
+  "phase": 1,
+  "pk": [
+   "key"
+  ],
+  "cols": {
+   "key": {
+    "type": "text",
+    "opt": false
+   },
+   "value": {
+    "type": "json",
+    "opt": false
+   },
+   "changed_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "changed_at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "phone_screen": {
+  "phase": 2,
+  "pk": [
+   "screen"
+  ],
+  "cols": {
+   "screen": {
+    "type": "text",
+    "opt": false
+   },
+   "is_on": {
+    "type": "bool",
+    "opt": false
+   },
+   "changed_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "changed_at": {
+    "type": "ts",
+    "opt": true
+   }
+  }
+ },
+ "audit_log": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "table_name": {
+    "type": "text",
+    "opt": false
+   },
+   "record_id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "action": {
+    "type": "text",
+    "opt": false
+   },
+   "old_values": {
+    "type": "json",
+    "opt": true
+   },
+   "new_values": {
+    "type": "json",
+    "opt": true
+   },
+   "by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
+ "sales_bill": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "ticket_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "weigh_ticket"
+   },
+   "bill_no": {
+    "type": "text",
+    "opt": false
+   },
+   "bill_date": {
+    "type": "date",
+    "opt": false
+   },
+   "rate": {
+    "type": "num8.2",
+    "opt": false
+   },
+   "vat_pct": {
+    "type": "num4.2",
+    "opt": false
+   },
+   "payment_mode": {
+    "type": "text",
+    "opt": false
+   },
+   "po_no": {
+    "type": "text",
+    "opt": true
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "entered_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "changed_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "changed_at": {
+    "type": "ts",
+    "opt": true
+   }
+  }
+ },
+ "payment": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "direction": {
+    "type": "text",
+    "opt": false
+   },
+   "supplier_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "supplier"
+   },
+   "buyer_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "buyer"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "amount": {
+    "type": "num12.2",
+    "opt": false
+   },
+   "mode": {
+    "type": "text",
+    "opt": false
+   },
+   "ref": {
+    "type": "text",
+    "opt": true
+   },
+   "entered_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "entered_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "changed_by": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "person"
+   },
+   "changed_at": {
+    "type": "ts",
+    "opt": true
+   }
+  }
+ },
+ "raw_price": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "material_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "supplier_id": {
+    "type": "uuid",
+    "opt": true,
+    "fk": "supplier"
+   },
+   "rate_per_kg": {
+    "type": "num8.2",
+    "opt": false
+   },
+   "valid_from": {
+    "type": "date",
+    "opt": false
+   }
+  }
+ },
+ "sale_price": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "buyer_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "buyer"
+   },
+   "product_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "rate_per_kg": {
+    "type": "num8.2",
+    "opt": false
+   },
+   "valid_from": {
+    "type": "date",
+    "opt": false
+   }
+  }
+ },
+ "product_vat": {
+  "phase": 3,
+  "pk": [
+   "product_id"
+  ],
+  "cols": {
+   "product_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "vat_pct": {
+    "type": "num4.2",
+    "opt": false
+   }
+  }
+ },
+ "moisture_standard": {
+  "phase": 3,
+  "pk": [
+   "material_id"
+  ],
+  "cols": {
+   "material_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "material"
+   },
+   "standard_pct": {
+    "type": "num4.1",
+    "opt": false
+   }
+  }
+ },
+ "daily_wage": {
+  "phase": 3,
+  "pk": [
+   "role"
+  ],
+  "cols": {
+   "role": {
+    "type": "text",
+    "opt": false
+   },
+   "rupees": {
+    "type": "num8.2",
+    "opt": false
+   }
+  }
+ },
+ "nea_tariff": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "name": {
+    "type": "text",
+    "opt": false
+   },
+   "demand_per_kva": {
+    "type": "num8.2",
+    "opt": false
+   },
+   "billed_kva": {
+    "type": "num8.1",
+    "opt": false
+   },
+   "peak_rate": {
+    "type": "num6.2",
+    "opt": false
+   },
+   "offpeak_rate": {
+    "type": "num6.2",
+    "opt": false
+   },
+   "normal_rate": {
+    "type": "num6.2",
+    "opt": false
+   },
+   "valid_from": {
+    "type": "date",
+    "opt": false
+   }
+  }
+ },
+ "lab_test": {
+  "phase": 3,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "report_no": {
+    "type": "text",
+    "opt": false
+   },
+   "ticket_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "weigh_ticket"
+   },
+   "method": {
+    "type": "text",
+    "opt": false
+   },
+   "reading_1": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "reading_2": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "reading_3": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "oven_wet_g": {
+    "type": "num8.2",
+    "opt": true
+   },
+   "oven_dry_g": {
+    "type": "num8.2",
+    "opt": true
+   },
+   "moisture_pct": {
+    "type": "num4.1",
+    "opt": true
+   },
+   "ash_sample_g": {
+    "type": "num8.3",
+    "opt": true
+   },
+   "ash_left_g": {
+    "type": "num8.3",
+    "opt": true
+   },
+   "ash_pct": {
+    "type": "num4.1",
+    "opt": true
+   }
+  }
+ }
+}

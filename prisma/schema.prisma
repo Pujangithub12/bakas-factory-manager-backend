@@ -1,0 +1,785 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Generated from the "Factory database map" (50 tables). Table and column names
+// match the map exactly. Phase 1 = gate, weighbridge, machines, production;
+// Phase 2 = maintenance plan, store, vehicles, electricity; Phase 3 = money, lab, planning.
+// Columns marked "Rs" are owner and accountant only - enforce that in the API.
+
+/// Phase 1. Everyone: staff, operators, helpers, drivers, guards, and new labourers registered at the gate.
+model person {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid /// Made on the phone or laptop, so entries work without signal
+  full_name String /// Name as on the ID
+  mobile String? @unique /// 10 digits; a duplicate mobile is refused
+  address String?
+  id_no String? /// Citizenship or other ID, if they have one
+  active Boolean @default(true) /// Inactive people stay in old records
+  checked Boolean @default(false) /// False until the supervisor confirms a new worker's details
+  registered_by String? @db.Uuid /// Security guard who registered them
+  registered_at DateTime? @db.Timestamptz(6)
+  checked_by String? @db.Uuid /// Supervisor who confirmed them
+  checked_at DateTime? @db.Timestamptz(6)
+  pin_hash String? /// Phone sign-in PIN, hashed
+  registered_by_rel person? @relation("person_registered_by", fields: [registered_by], references: [id], onDelete: Restrict)
+  checked_by_rel person? @relation("person_checked_by", fields: [checked_by], references: [id], onDelete: Restrict)
+  person_registered_by_back person[] @relation("person_registered_by")
+  person_checked_by_back person[] @relation("person_checked_by")
+  person_role_person_id_back person_role[] @relation("person_role_person_id")
+  operator_machine_person_id_back operator_machine[] @relation("operator_machine_person_id")
+  attendance_person_id_back attendance[] @relation("attendance_person_id")
+  attendance_gate_by_back attendance[] @relation("attendance_gate_by")
+  attendance_on_duty_by_back attendance[] @relation("attendance_on_duty_by")
+  shift_in_charge_person_id_back shift_in_charge[] @relation("shift_in_charge_person_id")
+  shift_in_charge_set_by_back shift_in_charge[] @relation("shift_in_charge_set_by")
+  visitor_meet_person_id_back visitor[] @relation("visitor_meet_person_id")
+  visitor_pass_by_back visitor[] @relation("visitor_pass_by")
+  visitor_out_by_back visitor[] @relation("visitor_out_by")
+  machine_run_operator_id_back machine_run[] @relation("machine_run_operator_id")
+  machine_run_entered_by_back machine_run[] @relation("machine_run_entered_by")
+  run_helper_person_id_back run_helper[] @relation("run_helper_person_id")
+  run_bypass_by_back run_bypass[] @relation("run_bypass_by")
+  downtime_entered_by_back downtime[] @relation("downtime_entered_by")
+  log_reading_by_back log_reading[] @relation("log_reading_by")
+  greasing_check_by_back greasing_check[] @relation("greasing_check_by")
+  bag_count_entered_by_back bag_count[] @relation("bag_count_entered_by")
+  maintenance_job_reported_by_back maintenance_job[] @relation("maintenance_job_reported_by")
+  maintenance_job_fitter_id_back maintenance_job[] @relation("maintenance_job_fitter_id")
+  pm_done_by_back pm_done[] @relation("pm_done_by")
+  hour_meter_reading_by_back hour_meter_reading[] @relation("hour_meter_reading_by")
+  driver_vehicle_person_id_back driver_vehicle[] @relation("driver_vehicle_person_id")
+  vehicle_session_driver_id_back vehicle_session[] @relation("vehicle_session_driver_id")
+  diesel_fill_by_back diesel_fill[] @relation("diesel_fill_by")
+  power_reading_by_back power_reading[] @relation("power_reading_by")
+  yard_batch_started_by_back yard_batch[] @relation("yard_batch_started_by")
+  yard_batch_finished_by_back yard_batch[] @relation("yard_batch_finished_by")
+  weigh_ticket_entered_by_back weigh_ticket[] @relation("weigh_ticket_entered_by")
+  weigh_ticket_out_by_back weigh_ticket[] @relation("weigh_ticket_out_by")
+  store_movement_to_person_id_back store_movement[] @relation("store_movement_to_person_id")
+  store_movement_by_back store_movement[] @relation("store_movement_by")
+  store_movement_returned_by_back store_movement[] @relation("store_movement_returned_by")
+  purchase_request_requested_by_back purchase_request[] @relation("purchase_request_requested_by")
+  purchase_request_approved_by_back purchase_request[] @relation("purchase_request_approved_by")
+  purchase_request_ordered_by_back purchase_request[] @relation("purchase_request_ordered_by")
+  purchase_request_received_by_back purchase_request[] @relation("purchase_request_received_by")
+  setting_changed_by_back setting[] @relation("setting_changed_by")
+  phone_screen_changed_by_back phone_screen[] @relation("phone_screen_changed_by")
+  audit_log_by_back audit_log[] @relation("audit_log_by")
+  sales_bill_entered_by_back sales_bill[] @relation("sales_bill_entered_by")
+  sales_bill_changed_by_back sales_bill[] @relation("sales_bill_changed_by")
+  payment_entered_by_back payment[] @relation("payment_entered_by")
+  payment_changed_by_back payment[] @relation("payment_changed_by")
+}
+
+/// Phase 1. The jobs a person has. One person can have several. Roles decide which screens they can open.
+model person_role {
+  person_id String @db.Uuid
+  role String /// Owner (super admin), Manager (admin), Supervisor, Operator, Driver, Security, Fitter, Store, Weighbridge
+  is_main Boolean @default(false) /// The main job, shown on lists
+  person_id_rel person @relation("person_role_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+
+  @@id([person_id, role])
+}
+
+/// Phase 1. Which machines each operator may run. The supervisor ticks them.
+model operator_machine {
+  person_id String @db.Uuid
+  machine_id String @db.Uuid
+  person_id_rel person @relation("operator_machine_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+  machine_id_rel machine @relation("operator_machine_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+
+  @@id([person_id, machine_id])
+}
+
+/// Phase 1. Day 06:00-18:00 and night 18:00-06:00. The first shift starts the production day.
+model shift {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  starts DateTime @db.Time(6)
+  ends DateTime @db.Time(6)
+  attendance_shift_id_back attendance[] @relation("attendance_shift_id")
+  shift_in_charge_shift_id_back shift_in_charge[] @relation("shift_in_charge_shift_id")
+}
+
+/// Phase 1. Gate in and out by security, on duty by the supervisor. Belongs to the shift it is for.
+model attendance {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id String @db.Uuid
+  shift_id String @db.Uuid
+  shift_start DateTime @db.Timestamptz(6) /// Start of that shift
+  gate_in DateTime? @db.Timestamptz(6)
+  gate_out DateTime? @db.Timestamptz(6) /// Empty while on site
+  gate_by String? @db.Uuid /// Security guard
+  on_duty_at DateTime? @db.Timestamptz(6) /// When the supervisor marked them working
+  on_duty_by String? @db.Uuid
+  person_id_rel person @relation("attendance_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+  shift_id_rel shift @relation("attendance_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
+  gate_by_rel person? @relation("attendance_gate_by", fields: [gate_by], references: [id], onDelete: Restrict)
+  on_duty_by_rel person? @relation("attendance_on_duty_by", fields: [on_duty_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Who is in charge of each shift. At night it changes as needed.
+model shift_in_charge {
+  shift_start DateTime @id @db.Timestamptz(6)
+  shift_id String @db.Uuid
+  person_id String @db.Uuid /// Supervisor, manager, operator, fitter or electrician
+  set_by String @db.Uuid
+  set_at DateTime @db.Timestamptz(6)
+  shift_id_rel shift @relation("shift_in_charge_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
+  person_id_rel person @relation("shift_in_charge_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+  set_by_rel person @relation("shift_in_charge_set_by", fields: [set_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Visitor gate passes, numbered VP-0101 and on.
+model visitor {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pass_no String @unique
+  name String
+  mobile String?
+  from_org String? /// Company or address
+  purpose String /// Meeting, Buyer, Supplier, Delivery, Contractor or repair, Government or inspection, Other
+  meet_person_id String? @db.Uuid /// Who they came to meet
+  people_count Int?
+  vehicle_no String?
+  id_doc String? /// ID type and number
+  carrying String? /// Tools or material taken in
+  time_in DateTime @db.Timestamptz(6)
+  time_out DateTime? @db.Timestamptz(6)
+  pass_by String @db.Uuid /// Security guard
+  out_by String? @db.Uuid
+  meet_person_id_rel person? @relation("visitor_meet_person_id", fields: [meet_person_id], references: [id], onDelete: Restrict)
+  pass_by_rel person @relation("visitor_pass_by", fields: [pass_by], references: [id], onDelete: Restrict)
+  out_by_rel person? @relation("visitor_out_by", fields: [out_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. The eight machines: DC-01, FC-01, WHM-01, DR-01, BM-01, HM-01, PM-01, BS-01.
+model machine {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tag String @unique /// PM-01
+  name String
+  make_model String? /// Andritz PM30-5
+  stage String /// chip, wetmill, dry, briquette, mill, pellet, sharpen
+  rated_capacity String? /// Maker's figure only. Output is never worked out from it
+  motor_kw Decimal? @db.Decimal(7, 1)
+  hour_meter_start Decimal? @db.Decimal(9, 1) /// Meter reading when records start
+  hour_meter_start_at DateTime? @db.Timestamptz(6)
+  wear_part String? /// Briquette die set
+  wear_limit_t Decimal? @db.Decimal(7, 1) /// Change after this many tons (300 t)
+  notes String?
+  operator_machine_machine_id_back operator_machine[] @relation("operator_machine_machine_id")
+  machine_run_machine_id_back machine_run[] @relation("machine_run_machine_id")
+  downtime_machine_id_back downtime[] @relation("downtime_machine_id")
+  log_reading_machine_id_back log_reading[] @relation("log_reading_machine_id")
+  greasing_check_machine_id_back greasing_check[] @relation("greasing_check_machine_id")
+  maintenance_job_machine_id_back maintenance_job[] @relation("maintenance_job_machine_id")
+  pm_task_machine_id_back pm_task[] @relation("pm_task_machine_id")
+  pm_done_machine_id_back pm_done[] @relation("pm_done_machine_id")
+  hour_meter_reading_machine_id_back hour_meter_reading[] @relation("hour_meter_reading_machine_id")
+}
+
+/// Phase 1. Why a machine stopped.
+model stop_reason {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String /// End of shift, Breakdown, Power cut...
+  type String /// Planned or Unplanned
+  machine_down Boolean @default(false)
+  calls_maintenance Boolean @default(false)
+  machine_run_stop_reason_id_back machine_run[] @relation("machine_run_stop_reason_id")
+  downtime_stop_reason_id_back downtime[] @relation("downtime_stop_reason_id")
+}
+
+/// Phase 1. The lines of each paper log sheet: hourly readings, pre-start checks and greasing.
+model log_field {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stage String /// pellet, briquette, dry
+  kind String /// reading, prestart or greasing
+  field_key String /// svLoad, oneMin, doorBolt...
+  label String /// As on the paper sheet
+  unit String? /// %, C, A, kg/cm2
+  required Boolean @default(false) /// The briquette 1-minute weight is required every hour
+  sort Int @default(0)
+  prestart_answer_field_id_back prestart_answer[] @relation("prestart_answer_field_id")
+}
+
+/// Phase 1. Start and stop of a machine. One open run per machine, locked to the operator who started it. No quantities here.
+model machine_run {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid
+  operator_id String @db.Uuid /// Must be checked in at the gate
+  started_at DateTime @db.Timestamptz(6)
+  stopped_at DateTime? @db.Timestamptz(6) /// Empty while running
+  stop_reason_id String? @db.Uuid
+  notes String?
+  entered_by String @db.Uuid
+  machine_id_rel machine @relation("machine_run_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  operator_id_rel person @relation("machine_run_operator_id", fields: [operator_id], references: [id], onDelete: Restrict)
+  stop_reason_id_rel stop_reason? @relation("machine_run_stop_reason_id", fields: [stop_reason_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("machine_run_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+  run_helper_run_id_back run_helper[] @relation("run_helper_run_id")
+  prestart_answer_run_id_back prestart_answer[] @relation("prestart_answer_run_id")
+  run_bypass_run_id_back run_bypass[] @relation("run_bypass_run_id")
+  log_reading_run_id_back log_reading[] @relation("log_reading_run_id")
+}
+
+/// Phase 1. Helpers on a run. Only people checked in and not on another machine.
+model run_helper {
+  run_id String @db.Uuid
+  person_id String @db.Uuid
+  run_id_rel machine_run @relation("run_helper_run_id", fields: [run_id], references: [id], onDelete: Restrict)
+  person_id_rel person @relation("run_helper_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+
+  @@id([run_id, person_id])
+}
+
+/// Phase 1. The yes/no checks answered at every start.
+model prestart_answer {
+  run_id String @db.Uuid
+  field_id String @db.Uuid /// A prestart line
+  answer Boolean /// Yes or No
+  run_id_rel machine_run @relation("prestart_answer_run_id", fields: [run_id], references: [id], onDelete: Restrict)
+  field_id_rel log_field @relation("prestart_answer_field_id", fields: [field_id], references: [id], onDelete: Restrict)
+
+  @@id([run_id, field_id])
+}
+
+/// Phase 1. A start with a No, run anyway with a remark. Opens a maintenance job.
+model run_bypass {
+  run_id String @id @db.Uuid
+  remark String /// What is wrong and why it is safe to run
+  job_id String? @db.Uuid
+  by String @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  run_id_rel machine_run @relation("run_bypass_run_id", fields: [run_id], references: [id], onDelete: Restrict)
+  job_id_rel maintenance_job? @relation("run_bypass_job_id", fields: [job_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("run_bypass_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Time a machine is down: breakdown, die change, power cut, no raw material.
+model downtime {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid
+  started_at DateTime @db.Timestamptz(6)
+  ended_at DateTime? @db.Timestamptz(6)
+  stop_reason_id String? @db.Uuid
+  notes String?
+  job_id String? @db.Uuid /// When it called maintenance
+  entered_by String @db.Uuid
+  machine_id_rel machine @relation("downtime_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  stop_reason_id_rel stop_reason? @relation("downtime_stop_reason_id", fields: [stop_reason_id], references: [id], onDelete: Restrict)
+  job_id_rel maintenance_job? @relation("downtime_job_id", fields: [job_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("downtime_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+  maintenance_job_downtime_id_back maintenance_job[] @relation("maintenance_job_downtime_id")
+}
+
+/// Phase 1. One hourly line of the log sheet. Briquette tons = the 1-minute weight x running time, until the next weighing.
+model log_reading {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid
+  run_id String? @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  vals Json /// field_key -> value, for that machine's log_field lines
+  one_min_kg Decimal? @db.Decimal(7, 2) /// Briquette output in one minute
+  by String @db.Uuid
+  machine_id_rel machine @relation("log_reading_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  run_id_rel machine_run? @relation("log_reading_run_id", fields: [run_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("log_reading_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Pellet mill greasing once a shift, in seconds.
+model greasing_check {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid
+  shift_start DateTime @db.Timestamptz(6)
+  vals Json /// T shaft and main bearing seconds
+  by String @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  machine_id_rel machine @relation("greasing_check_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("greasing_check_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Pellet bags counted into the store every few hours. Pellet tons = bags x kg per bag.
+model bag_count {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  product_id String @db.Uuid
+  period_from DateTime @db.Timestamptz(6)
+  period_to DateTime @db.Timestamptz(6)
+  bags Int
+  kg_per_bag Decimal @default(25) @db.Decimal(5, 1)
+  entered_by String @db.Uuid /// Operator, supervisor or store
+  entered_at DateTime @db.Timestamptz(6)
+  product_id_rel material @relation("bag_count_product_id", fields: [product_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("bag_count_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Breakdowns, problems reported, bypasses and maintenance requests. Reported -> working on it -> fixed.
+model maintenance_job {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind String /// breakdown, problem, bypass, wear, request, round
+  machine_id String @db.Uuid
+  problem String /// Strange noise, Overheating... or Maintenance request: part
+  note String?
+  when_needed String? /// Requests: next stop, this week, today
+  reported_by String @db.Uuid
+  reported_at DateTime @db.Timestamptz(6)
+  machine_stopped Boolean @default(false)
+  downtime_id String? @db.Uuid
+  fitter_id String? @db.Uuid /// Who took it
+  started_at DateTime? @db.Timestamptz(6)
+  fixed_at DateTime? @db.Timestamptz(6)
+  work_done String?
+  parts_used String?
+  machine_id_rel machine @relation("maintenance_job_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  reported_by_rel person @relation("maintenance_job_reported_by", fields: [reported_by], references: [id], onDelete: Restrict)
+  downtime_id_rel downtime? @relation("maintenance_job_downtime_id", fields: [downtime_id], references: [id], onDelete: Restrict)
+  fitter_id_rel person? @relation("maintenance_job_fitter_id", fields: [fitter_id], references: [id], onDelete: Restrict)
+  run_bypass_job_id_back run_bypass[] @relation("run_bypass_job_id")
+  downtime_job_id_back downtime[] @relation("downtime_job_id")
+  store_movement_job_id_back store_movement[] @relation("store_movement_job_id")
+}
+
+/// Phase 2. The maintenance plan: 51 tasks from the Andritz and FOMA manuals and the lubrication list. Due on running hours or days, whichever comes first.
+model pm_task {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid /// Whose hour meter counts
+  equipment String /// Pellet mill PM30, Cooler PCF020...
+  component String /// Gearbox, Mill bearings, Ring die...
+  task String
+  every_hours Decimal? @db.Decimal(8, 1) /// Or tons, see counts
+  every_days Int?
+  counts String? /// hours or tons (briquette wear set every 300 t)
+  lubricant String? /// Grade and amount
+  source String? /// Manual section
+  operator_can_do Boolean @default(false) /// Daily checks, greasing, cleaning, checks
+  machine_id_rel machine @relation("pm_task_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  pm_done_task_id_back pm_done[] @relation("pm_done_task_id")
+  store_movement_task_id_back store_movement[] @relation("store_movement_task_id")
+}
+
+/// Phase 2. Maintenance done: a plan task, or other work written in.
+model pm_done {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  task_id String? @db.Uuid /// Empty for other work
+  machine_id String @db.Uuid
+  done_at DateTime @db.Timestamptz(6)
+  by String @db.Uuid /// Fitter or operator
+  hour_meter Decimal? @db.Decimal(9, 1) /// At that time
+  minutes Int?
+  note String?
+  task_id_rel pm_task? @relation("pm_done_task_id", fields: [task_id], references: [id], onDelete: Restrict)
+  machine_id_rel machine @relation("pm_done_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("pm_done_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Real meter readings from the machines, to correct the counted hours now and then.
+model hour_meter_reading {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  machine_id String @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  hours Decimal @db.Decimal(9, 1)
+  by String @db.Uuid
+  machine_id_rel machine @relation("hour_meter_reading_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("hour_meter_reading_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. JCB-01, Tractor 2365, Tractor 1441.
+model vehicle {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  type String /// JCB, Tractor
+  reg_no String?
+  meter String /// hours or km
+  driver_vehicle_vehicle_id_back driver_vehicle[] @relation("driver_vehicle_vehicle_id")
+  vehicle_session_vehicle_id_back vehicle_session[] @relation("vehicle_session_vehicle_id")
+  diesel_fill_vehicle_id_back diesel_fill[] @relation("diesel_fill_vehicle_id")
+}
+
+/// Phase 2. Which vehicles each driver may drive.
+model driver_vehicle {
+  person_id String @db.Uuid
+  vehicle_id String @db.Uuid
+  person_id_rel person @relation("driver_vehicle_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+  vehicle_id_rel vehicle @relation("driver_vehicle_vehicle_id", fields: [vehicle_id], references: [id], onDelete: Restrict)
+
+  @@id([person_id, vehicle_id])
+}
+
+/// Phase 2. Start and stop of work with the hour meter. One open session per vehicle.
+model vehicle_session {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicle_id String @db.Uuid
+  driver_id String @db.Uuid
+  started_at DateTime @db.Timestamptz(6)
+  stopped_at DateTime? @db.Timestamptz(6)
+  meter_start Decimal? @db.Decimal(9, 1)
+  meter_end Decimal? @db.Decimal(9, 1)
+  job String? /// Feeding the chippers, Moving raw material...
+  vehicle_id_rel vehicle @relation("vehicle_session_vehicle_id", fields: [vehicle_id], references: [id], onDelete: Restrict)
+  driver_id_rel person @relation("vehicle_session_driver_id", fields: [driver_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Diesel filled, logged by the driver.
+model diesel_fill {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicle_id String @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  litres Decimal @db.Decimal(7, 1)
+  meter Decimal? @db.Decimal(9, 1) /// At the fill
+  by String @db.Uuid
+  vehicle_id_rel vehicle @relation("diesel_fill_vehicle_id", fields: [vehicle_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("diesel_fill_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Main kWh meter read every hour. kWh between readings goes into the NEA time-of-day band of that hour.
+model power_reading {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  kwh_meter Decimal @db.Decimal(12, 1) /// Cumulative
+  load_kw Decimal? @db.Decimal(7, 1)
+  power_factor Decimal? @db.Decimal(3, 2)
+  by String @db.Uuid
+  by_rel person @relation("power_reading_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Raw materials and finished products.
+model material {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  kind String /// Raw or Finished product
+  feed_stage String? /// First machine for a raw material: chip, wetmill, dry
+  bag_kg Decimal? @db.Decimal(5, 1) /// Pellets 25
+  notes String?
+  bag_count_product_id_back bag_count[] @relation("bag_count_product_id")
+  weigh_ticket_material_id_back weigh_ticket[] @relation("weigh_ticket_material_id")
+  opening_stock_product_id_back opening_stock[] @relation("opening_stock_product_id")
+  raw_price_material_id_back raw_price[] @relation("raw_price_material_id")
+  sale_price_product_id_back sale_price[] @relation("sale_price_product_id")
+  product_vat_product_id_back product_vat[] @relation("product_vat_product_id")
+  moisture_standard_material_id_back moisture_standard[] @relation("moisture_standard_material_id")
+}
+
+/// Phase 1. Raw material suppliers.
+model supplier {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  phone String?
+  address String?
+  pan String?
+  usually_supplies String?
+  weigh_ticket_supplier_id_back weigh_ticket[] @relation("weigh_ticket_supplier_id")
+  payment_supplier_id_back payment[] @relation("payment_supplier_id")
+  raw_price_supplier_id_back raw_price[] @relation("raw_price_supplier_id")
+}
+
+/// Phase 1. Customers.
+model buyer {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  phone String?
+  address String?
+  pan_vat String? /// Goes on the bill
+  products String?
+  weigh_ticket_buyer_id_back weigh_ticket[] @relation("weigh_ticket_buyer_id")
+  payment_buyer_id_back payment[] @relation("payment_buyer_id")
+  sale_price_buyer_id_back sale_price[] @relation("sale_price_buyer_id")
+}
+
+/// Phase 1. Yards A, B, C: 17, 17 and 16 trucks.
+model yard {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String
+  letter String @unique /// Used in batch codes
+  holds_trucks Int?
+  yard_batch_yard_id_back yard_batch[] @relation("yard_batch_yard_id")
+}
+
+/// Phase 1. Each filling of a yard (A-08).
+model yard_batch {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  yard_id String @db.Uuid
+  seq Int /// A-08 -> 8
+  opened_at DateTime @db.Timestamptz(6)
+  closed_at DateTime? @db.Timestamptz(6) /// Closed for filling
+  started_at DateTime? @db.Timestamptz(6) /// First fed into a machine
+  finished_at DateTime? @db.Timestamptz(6) /// Marked empty
+  started_by String? @db.Uuid
+  finished_by String? @db.Uuid
+  yard_id_rel yard @relation("yard_batch_yard_id", fields: [yard_id], references: [id], onDelete: Restrict)
+  started_by_rel person? @relation("yard_batch_started_by", fields: [started_by], references: [id], onDelete: Restrict)
+  finished_by_rel person? @relation("yard_batch_finished_by", fields: [finished_by], references: [id], onDelete: Restrict)
+  weigh_ticket_batch_id_back weigh_ticket[] @relation("weigh_ticket_batch_id")
+}
+
+/// Phase 1. One truck at the weighbridge, weighed twice, in kg. In: first = gross, second = tare. Out (sale): first = tare, second = gross.
+model weigh_ticket {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  wbsn Int @unique /// Weighbridge serial
+  direction String /// in or out
+  vehicle_type String?
+  vehicle_no String /// May have Devanagari digits
+  driver_name String?
+  driver_contact String?
+  supplier_id String? @db.Uuid /// Trucks in
+  buyer_id String? @db.Uuid /// Sales out
+  material_id String @db.Uuid
+  first_kg Int
+  first_at DateTime @db.Timestamptz(6)
+  second_kg Int? /// Empty while on site
+  second_at DateTime? @db.Timestamptz(6)
+  moisture_1 Decimal? @db.Decimal(4, 1) /// Pins, raw material
+  moisture_2 Decimal? @db.Decimal(4, 1)
+  moisture_3 Decimal? @db.Decimal(4, 1)
+  batch_id String? @db.Uuid /// Yard it unloads at
+  challan_no String? /// Sales: from the challan book, BREL/032; restarts each fiscal year
+  po_no String? /// Buyer's P.O.
+  vcts_no String?
+  remarks String?
+  entered_by String @db.Uuid
+  out_by String? @db.Uuid
+  supplier_id_rel supplier? @relation("weigh_ticket_supplier_id", fields: [supplier_id], references: [id], onDelete: Restrict)
+  buyer_id_rel buyer? @relation("weigh_ticket_buyer_id", fields: [buyer_id], references: [id], onDelete: Restrict)
+  material_id_rel material @relation("weigh_ticket_material_id", fields: [material_id], references: [id], onDelete: Restrict)
+  batch_id_rel yard_batch? @relation("weigh_ticket_batch_id", fields: [batch_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("weigh_ticket_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+  out_by_rel person? @relation("weigh_ticket_out_by", fields: [out_by], references: [id], onDelete: Restrict)
+  sales_bill_ticket_id_back sales_bill? @relation("sales_bill_ticket_id")
+  lab_test_ticket_id_back lab_test[] @relation("lab_test_ticket_id")
+}
+
+/// Phase 1. Stock in the store when records start. Stock now = opening + made - sold (worked out, not stored).
+model opening_stock {
+  product_id String @db.Uuid
+  as_of DateTime @db.Timestamptz(6)
+  kg Int
+  product_id_rel material @relation("opening_stock_product_id", fields: [product_id], references: [id], onDelete: Restrict)
+
+  @@id([product_id, as_of])
+}
+
+/// Phase 2. Tools and tackles, spares (with part numbers), lubricants and consumables.
+model store_item {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind String /// Tool, Spare, Lubricant, Consumable
+  code String? @unique /// Part no., e.g. 132184541
+  name String
+  unit String /// pc, set, kg, L
+  qty Decimal @default(0) @db.Decimal(10, 2) /// In store now
+  min_qty Decimal? @db.Decimal(10, 2) /// Below this: alert and a ready-made request
+  rate Decimal? @db.Decimal(12, 2) /// Rs (owner and finance only). Rs per unit
+  location String? /// Tool room, Spares rack A...
+  store_movement_item_id_back store_movement[] @relation("store_movement_item_id")
+  purchase_request_line_item_id_back purchase_request_line[] @relation("purchase_request_line_item_id")
+}
+
+/// Phase 2. Stock received, used, and tools out and back.
+model store_movement {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  item_id String @db.Uuid
+  type String /// received, issued, tool_out
+  qty Decimal @db.Decimal(10, 2)
+  to_person_id String? @db.Uuid /// Who took it
+  by String @db.Uuid /// Store supervisor
+  at DateTime @db.Timestamptz(6)
+  due_back DateTime? @db.Timestamptz(6) /// Tools: end of shift
+  returned_at DateTime? @db.Timestamptz(6)
+  condition String? /// OK, Damaged, Missing
+  returned_by String? @db.Uuid
+  note String?
+  job_id String? @db.Uuid
+  task_id String? @db.Uuid
+  pr_id String? @db.Uuid /// Received against
+  item_id_rel store_item @relation("store_movement_item_id", fields: [item_id], references: [id], onDelete: Restrict)
+  to_person_id_rel person? @relation("store_movement_to_person_id", fields: [to_person_id], references: [id], onDelete: Restrict)
+  by_rel person @relation("store_movement_by", fields: [by], references: [id], onDelete: Restrict)
+  returned_by_rel person? @relation("store_movement_returned_by", fields: [returned_by], references: [id], onDelete: Restrict)
+  job_id_rel maintenance_job? @relation("store_movement_job_id", fields: [job_id], references: [id], onDelete: Restrict)
+  task_id_rel pm_task? @relation("store_movement_task_id", fields: [task_id], references: [id], onDelete: Restrict)
+  pr_id_rel purchase_request? @relation("store_movement_pr_id", fields: [pr_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Anyone asks for something the factory needs. Requested -> approved or rejected -> ordered -> received.
+model purchase_request {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pr_no String @unique /// PR-0001
+  requested_by String @db.Uuid
+  requested_at DateTime @db.Timestamptz(6)
+  reason String?
+  need_by DateTime? @db.Date
+  priority String /// Normal or Urgent
+  status String /// Requested, Approved, Rejected, Ordered, Received
+  approved_by String? @db.Uuid
+  approved_at DateTime? @db.Timestamptz(6)
+  reject_reason String?
+  ordered_by String? @db.Uuid
+  ordered_at DateTime? @db.Timestamptz(6)
+  vendor String?
+  expected_on DateTime? @db.Date
+  amount Decimal? @db.Decimal(12, 2) /// Rs (owner and finance only)
+  received_by String? @db.Uuid
+  received_at DateTime? @db.Timestamptz(6)
+  requested_by_rel person @relation("purchase_request_requested_by", fields: [requested_by], references: [id], onDelete: Restrict)
+  approved_by_rel person? @relation("purchase_request_approved_by", fields: [approved_by], references: [id], onDelete: Restrict)
+  ordered_by_rel person? @relation("purchase_request_ordered_by", fields: [ordered_by], references: [id], onDelete: Restrict)
+  received_by_rel person? @relation("purchase_request_received_by", fields: [received_by], references: [id], onDelete: Restrict)
+  store_movement_pr_id_back store_movement[] @relation("store_movement_pr_id")
+  purchase_request_line_pr_id_back purchase_request_line[] @relation("purchase_request_line_pr_id")
+}
+
+/// Phase 2. Items on a request: a store item or anything written in.
+model purchase_request_line {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pr_id String @db.Uuid
+  item_id String? @db.Uuid /// Empty if not a store item
+  description String?
+  qty Decimal @db.Decimal(10, 2)
+  unit String?
+  pr_id_rel purchase_request @relation("purchase_request_line_pr_id", fields: [pr_id], references: [id], onDelete: Restrict)
+  item_id_rel store_item? @relation("purchase_request_line_item_id", fields: [item_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. One-off values: company name, address, PAN/VAT, phone, moisture deduction rule, daily targets.
+model setting {
+  key String @id
+  value Json
+  changed_by String? @db.Uuid
+  changed_at DateTime @db.Timestamptz(6)
+  changed_by_rel person? @relation("setting_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 2. Phone screens and tabs switched on or off by the factory manager or the owner.
+model phone_screen {
+  screen String @id /// store, weighbridge, operator.info...
+  is_on Boolean @default(true)
+  changed_by String? @db.Uuid
+  changed_at DateTime? @db.Timestamptz(6)
+  changed_by_rel person? @relation("phone_screen_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 1. Every insert, change and delete, with who and when. Corrections are made by management and stay visible here.
+model audit_log {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  table_name String
+  record_id String @db.Uuid
+  action String /// insert, update, delete
+  old_values Json?
+  new_values Json?
+  by String @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  by_rel person @relation("audit_log_by", fields: [by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. The bill from the printed bill book, entered here: same no. as the challan. A cash bill counts as paid.
+model sales_bill {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticket_id String @unique @db.Uuid /// One bill per sales truck
+  bill_no String /// 032
+  bill_date DateTime @db.Date
+  rate Decimal @db.Decimal(8, 2) /// Rs (owner and finance only). Rs per kg
+  vat_pct Decimal @db.Decimal(4, 2) /// Rs (owner and finance only). Pellets 13, briquettes 0
+  payment_mode String /// Cash, Credit, Other
+  po_no String?
+  note String?
+  entered_by String @db.Uuid /// Manager or finance
+  entered_at DateTime @db.Timestamptz(6)
+  changed_by String? @db.Uuid
+  changed_at DateTime? @db.Timestamptz(6)
+  ticket_id_rel weigh_ticket @relation("sales_bill_ticket_id", fields: [ticket_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("sales_bill_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+  changed_by_rel person? @relation("sales_bill_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. Money paid to suppliers and received from buyers.
+model payment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  direction String /// paid or received
+  supplier_id String? @db.Uuid
+  buyer_id String? @db.Uuid
+  at DateTime @db.Timestamptz(6)
+  amount Decimal @db.Decimal(12, 2) /// Rs (owner and finance only)
+  mode String /// Bank, Cheque, Cash
+  ref String? /// Cheque or transfer no.
+  entered_by String @db.Uuid
+  entered_at DateTime @db.Timestamptz(6)
+  changed_by String? @db.Uuid
+  changed_at DateTime? @db.Timestamptz(6)
+  supplier_id_rel supplier? @relation("payment_supplier_id", fields: [supplier_id], references: [id], onDelete: Restrict)
+  buyer_id_rel buyer? @relation("payment_buyer_id", fields: [buyer_id], references: [id], onDelete: Restrict)
+  entered_by_rel person @relation("payment_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+  changed_by_rel person? @relation("payment_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. What we pay per kg of raw material, for all suppliers or one supplier, from a date.
+model raw_price {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  material_id String @db.Uuid
+  supplier_id String? @db.Uuid /// Empty = every supplier
+  rate_per_kg Decimal @db.Decimal(8, 2) /// Rs (owner and finance only)
+  valid_from DateTime @db.Date
+  material_id_rel material @relation("raw_price_material_id", fields: [material_id], references: [id], onDelete: Restrict)
+  supplier_id_rel supplier? @relation("raw_price_supplier_id", fields: [supplier_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. What a buyer pays per kg of a product, from a date.
+model sale_price {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buyer_id String @db.Uuid
+  product_id String @db.Uuid
+  rate_per_kg Decimal @db.Decimal(8, 2) /// Rs (owner and finance only)
+  valid_from DateTime @db.Date
+  buyer_id_rel buyer @relation("sale_price_buyer_id", fields: [buyer_id], references: [id], onDelete: Restrict)
+  product_id_rel material @relation("sale_price_product_id", fields: [product_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. VAT by product.
+model product_vat {
+  product_id String @id @db.Uuid
+  vat_pct Decimal @db.Decimal(4, 2) /// Rs (owner and finance only)
+  product_id_rel material @relation("product_vat_product_id", fields: [product_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. Moisture standard per raw material. For each 1% above it, 1% of the weight is not paid.
+model moisture_standard {
+  material_id String @id @db.Uuid
+  standard_pct Decimal @db.Decimal(4, 1)
+  material_id_rel material @relation("moisture_standard_material_id", fields: [material_id], references: [id], onDelete: Restrict)
+}
+
+/// Phase 3. Wage per shift by role, for the labour cost.
+model daily_wage {
+  role String @id
+  rupees Decimal @db.Decimal(8, 2) /// Rs (owner and finance only)
+}
+
+/// Phase 3. NEA time-of-day tariff: demand charge and peak, off-peak, normal rates.
+model nea_tariff {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name String /// Industrial, 11 kV, TOD
+  demand_per_kva Decimal @db.Decimal(8, 2) /// Rs (owner and finance only)
+  billed_kva Decimal @db.Decimal(8, 1)
+  peak_rate Decimal @db.Decimal(6, 2) /// Rs (owner and finance only). 17:00-23:00
+  offpeak_rate Decimal @db.Decimal(6, 2) /// Rs (owner and finance only). 23:00-05:00
+  normal_rate Decimal @db.Decimal(6, 2) /// Rs (owner and finance only). 05:00-17:00
+  valid_from DateTime @db.Date
+}
+
+/// Phase 3. A test on a truck. Sales trucks get a printed lab report. On raw material, a lab result replaces the pin readings.
+model lab_test {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  report_no String @unique /// LR-0501
+  ticket_id String @db.Uuid
+  method String /// meter, oven, pins
+  reading_1 Decimal? @db.Decimal(4, 1) /// Moisture meter or pins
+  reading_2 Decimal? @db.Decimal(4, 1)
+  reading_3 Decimal? @db.Decimal(4, 1)
+  oven_wet_g Decimal? @db.Decimal(8, 2) /// Hot air oven, 105 C
+  oven_dry_g Decimal? @db.Decimal(8, 2)
+  moisture_pct Decimal? @db.Decimal(4, 1) /// Result
+  ash_sample_g Decimal? @db.Decimal(8, 3) /// Muffle furnace
+  ash_left_g Decimal? @db.Decimal(8, 3)
+  ash_pct Decimal? @db.Decimal(4, 1)
+  ticket_id_rel weigh_ticket @relation("lab_test_ticket_id", fields: [ticket_id], references: [id], onDelete: Restrict)
+}
