@@ -4,10 +4,11 @@
 //   Manager     admin. Only the Owner can make someone a Manager.
 //   Supervisor  runs the shift. Made by the Owner or a Manager.
 //   Operator, Driver, Security, Fitter, Store, Weighbridge  work roles; the Owner, a Manager or a Supervisor can give them.
+//   Helper      a labourer registered at the gate. Has no screens and no sign-in; can crew a machine.
 //
 // A person can hold several roles. Nobody is deleted: "removing" a user marks them inactive.
 
-export const ROLES = ["Owner", "Manager", "Supervisor", "Operator", "Driver", "Security", "Fitter", "Store", "Weighbridge"] as const;
+export const ROLES = ["Owner", "Manager", "Supervisor", "Operator", "Driver", "Security", "Fitter", "Store", "Weighbridge", "Helper"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const isRole = (r: unknown): r is Role => typeof r === "string" && (ROLES as readonly string[]).includes(r);

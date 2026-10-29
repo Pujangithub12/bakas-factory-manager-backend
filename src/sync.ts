@@ -83,7 +83,7 @@ type Rule = { roles: string[]; del?: boolean };
 /** Who may write each Phase 1 table from a phone. Owner/Manager/Supervisor can write all of them. */
 const WRITE: Record<string, Rule> = {
   person: { roles: [...GATE] },
-  person_role: { roles: [...GATE] },
+  person_role: { roles: [...GATE], del: true }, // a supervisor can correct a worker's role (see the delete check below)
   operator_machine: { roles: [], del: true },
   attendance: { roles: [...GATE] },
   shift_in_charge: { roles: [] },
@@ -170,8 +170,10 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
     const d = (tx as unknown as Record<string, Record<string, (a: object) => Promise<Record<string, unknown> | null>>>)[op.table];
     const old = await d.findUnique({ where });
 
+    const isMgmt = who.roles.some((r) => MANAGEMENT.includes(r));
     if (op.op === "delete") {
       if (!old) return;
+      if (op.table === "person_role" && !isMgmt) throw new Reject("Only the supervisor can change roles");
       await d.delete({ where });
       await tx.audit_log.create({
         data: { table_name: op.table, record_id: recordId(t, old), action: "delete", old_values: plain(old), by: who.id, at: new Date() },
@@ -179,9 +181,37 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       return;
     }
 
-    const isMgmt = who.roles.some((r) => MANAGEMENT.includes(r));
     if (!isMgmt && old && (op.table === "person" || op.table === "person_role")) {
       throw new Reject("Only the supervisor can change registered details");
+    }
+    // On duty is marked by the supervisor, not at the gate. (A guard's own gate entries leave it unchanged.)
+    if (op.table === "attendance" && !isMgmt) {
+      const sameTime = (x: unknown, y: unknown) => (x == null && y == null) || (x != null && y != null && new Date(String(x)).getTime() === new Date(String(y)).getTime());
+      const changesTime = "on_duty_at" in op.data && !sameTime(op.data.on_duty_at, old?.on_duty_at ?? null);
+      const changesBy = "on_duty_by" in op.data && op.data.on_duty_by != null && op.data.on_duty_by !== (old?.on_duty_by ?? null);
+      if (changesTime || changesBy) throw new Reject("Only the supervisor can mark someone on duty");
+    }
+    // Gate: someone still running (or helping on) a machine cannot be checked out until the run is stopped.
+    if (op.table === "attendance" && !admin && old && !old.gate_out && op.data.gate_out) {
+      const pid = String(old.person_id);
+      const running = await tx.machine_run.findFirst({
+        where: { stopped_at: null, OR: [{ operator_id: pid }, { run_helper_run_id_back: { some: { person_id: pid } } }] },
+        select: { id: true },
+      });
+      if (running) throw new Reject("Still running a machine. Stop the run before checking out.");
+    }
+
+    // Starting a machine: the operator themselves, on a machine the supervisor has ticked for them.
+    // (Every operator may run the briquette machine and both chippers.)
+    if (op.table === "machine_run" && !old && !isMgmt) {
+      if (!who.roles.includes("Operator")) throw new Reject("Only an operator can start a machine");
+      if (op.data.operator_id !== who.id) throw new Reject("A run is started by the operator themselves");
+      const machineId = String(op.data.machine_id);
+      const m = await tx.machine.findUnique({ where: { id: machineId }, select: { stage: true } });
+      if (!m) throw new Reject("Unknown machine");
+      const everyOperator = m.stage === "briquette" || m.stage === "chip";
+      const ticked = await tx.operator_machine.findUnique({ where: { person_id_machine_id: { person_id: who.id, machine_id: machineId } } });
+      if (!everyOperator && !ticked) throw new Reject("You are not allowed to run this machine. Ask the supervisor to tick it for you.");
     }
     // Anyone may report a problem, but only a fitter (or management) may change an existing job.
     if (op.table === "maintenance_job" && old && !isMgmt && !who.roles.includes("Fitter")) {
