@@ -15,7 +15,12 @@ const TABLES = meta as unknown as Record<string, TableMeta>;
 const REFERENCE = [
   "person_role", "operator_machine", "shift", "machine", "stop_reason", "log_field",
   "material", "supplier", "buyer", "yard", "opening_stock",
+  "vehicle", "driver_vehicle", "pm_task", "phone_screen",
 ] as const;
+
+const PR_OPEN = ["Requested", "Approved", "Ordered"];
+/** Settings only the Owner may read or change. */
+const OWNER_SETTINGS = ["diesel_rate"];
 
 export const syncRouter = Router();
 syncRouter.use(requireAuth);
@@ -39,6 +44,44 @@ syncRouter.get("/sync/pull", async (req, res) => {
     yard_batch: { OR: [{ opened_at: { gte: since } }, open("finished_at")] },
     maintenance_job: { OR: [{ reported_at: { gte: since } }, open("fixed_at")] },
     weigh_ticket: { OR: [{ first_at: { gte: since } }, open("second_at")] },
+    vehicle_session: { OR: [{ started_at: { gte: since } }, open("stopped_at")] },
+    diesel_fill: { at: { gte: since } },
+    hour_meter_reading: { at: { gte: since } },
+    pm_done: { done_at: { gte: since } },
+    // Tools still out stay on the list however old they are.
+    store_movement: { OR: [{ at: { gte: since } }, { due_back: { not: null }, returned_at: null }] },
+    visitor: { OR: [{ time_in: { gte: since } }, open("time_out")] },
+    purchase_request: { OR: [{ requested_at: { gte: since } }, { status: { in: PR_OPEN } }] },
+    purchase_request_line: { pr_id_rel: { OR: [{ requested_at: { gte: since } }, { status: { in: PR_OPEN } }] } },
+  };
+  // Rupee columns are for the Owner only. A Manager enters bills and payments, so sees his own of the last 7 days.
+  const owner = req.auth!.roles.includes("Owner");
+  const manager = req.auth!.roles.includes("Manager");
+  const me = req.auth!.id;
+  const week = new Date(Date.now() - 7 * 86_400_000);
+  const inWindow = { OR: [{ first_at: { gte: since } }, open("second_at")] };
+  Object.assign(windowed, {
+    power_reading: { at: { gte: since } },
+    lab_test: { ticket_id_rel: inWindow },
+  });
+  const moneyReads = () => {
+    const read = (t: string, args: object = {}) => db[t].findMany(args).then((r) => (data[t] = r));
+    const out: Promise<unknown>[] = [];
+    if (owner) {
+      for (const t of ["raw_price", "sale_price", "product_vat", "daily_wage", "nea_tariff"]) out.push(read(t));
+      out.push(read("sales_bill", { where: { ticket_id_rel: inWindow } }), read("payment", { where: { at: { gte: since } } }));
+    } else if (manager) {
+      // The Manager sees which trucks have a bill, but a rate or an amount only on his own entries of the last 7 days.
+      const mine = { entered_by: me, entered_at: { gte: week } };
+      out.push(
+        db.sales_bill.findMany({ where: { ticket_id_rel: inWindow } }).then((rows) => {
+          data.sales_bill = (rows as Record<string, unknown>[]).map((b) =>
+            b.entered_by === me && new Date(String(b.entered_at)) >= week ? b : { ...b, rate: null, vat_pct: null, payment_mode: null, po_no: null, note: null });
+        }),
+        read("payment", { where: mine }),
+      );
+    }
+    return out;
   };
 
   const data: Record<string, unknown[]> = {};
@@ -48,7 +91,23 @@ syncRouter.get("/sync/pull", async (req, res) => {
     prisma.person.findMany({ omit: { pin_hash: true } }).then((r) => (data.person = r)),
     ...REFERENCE.map((t) => db[t].findMany().then((r) => (data[t] = r))),
     ...Object.entries(windowed).map(([t, where]) => db[t].findMany({ where }).then((r) => (data[t] = r))),
+    prisma.store_item.findMany({ omit: owner ? {} : { rate: true } }).then((r) => (data.store_item = r)),
+    prisma.moisture_standard.findMany().then((r) => (data.moisture_standard = r)),
+    prisma.setting.findMany({ where: owner ? {} : { key: { notIn: OWNER_SETTINGS } } }).then((r) => (data.setting = r)),
+    ...moneyReads(),
   ]);
+  // The maintenance plan and the hour meter need the latest entry however long ago it was made.
+  const [lastDone, lastMeter] = await Promise.all([
+    prisma.pm_done.findMany({ distinct: ["task_id"], orderBy: { done_at: "desc" }, where: { task_id: { not: null } } }),
+    prisma.hour_meter_reading.findMany({ distinct: ["machine_id"], orderBy: { at: "desc" } }),
+  ]);
+  const merge = (table: string, extra: { id: string }[]) => {
+    const have = new Set((data[table] as { id: string }[]).map((r) => r.id));
+    data[table].push(...extra.filter((r) => !have.has(r.id)));
+  };
+  merge("pm_done", lastDone);
+  merge("hour_meter_reading", lastMeter);
+  if (!owner) for (const r of data.purchase_request as Record<string, unknown>[]) delete r.amount;
 
   // Challan numbers restart each fiscal year (1 Shrawan, about 17 July). A phone only holds a few
   // days of tickets, so the server says where the numbering has reached.
@@ -92,7 +151,7 @@ const WRITE: Record<string, Rule> = {
   prestart_answer: { roles: [...FIELD_STAFF] },
   run_bypass: { roles: [...FIELD_STAFF] },
   downtime: { roles: [...FIELD_STAFF] },
-  log_reading: { roles: [...FIELD_STAFF] },
+  log_reading: { roles: [...FIELD_STAFF], del: true }, // an operator corrects or deletes his own reading
   greasing_check: { roles: [...FIELD_STAFF] },
   bag_count: { roles: [...FIELD_STAFF, ...STORE, ...WEIGH] },
   yard_batch: { roles: [...FIELD_STAFF, ...WEIGH] },
@@ -100,12 +159,32 @@ const WRITE: Record<string, Rule> = {
   weigh_ticket: { roles: [...WEIGH] },
   supplier: { roles: [...WEIGH] },
   buyer: { roles: [...WEIGH] },
+  // Phase 2. Anyone on a phone may ask for something; the other rules are checked in applyOp.
+  vehicle_session: { roles: ["Driver"] },
+  diesel_fill: { roles: ["Driver"] },
+  hour_meter_reading: { roles: [...FIELD_STAFF] },
+  pm_done: { roles: [...FIELD_STAFF] },
+  visitor: { roles: [...GATE] },
+  store_item: { roles: [...STORE, "Fitter"] },
+  store_movement: { roles: [...STORE, "Fitter"] },
+  purchase_request: { roles: [...FIELD_STAFF, ...GATE, ...WEIGH, ...STORE, "Driver"] },
+  purchase_request_line: { roles: [...FIELD_STAFF, ...GATE, ...WEIGH, ...STORE, "Driver"] },
+  // Phase 3. Money tables are limited to the Owner and a Manager in applyOp.
+  power_reading: { roles: [...FIELD_STAFF] },
+  lab_test: { roles: [...WEIGH] },
+  sales_bill: { roles: [] },
+  payment: { roles: [] },
 };
+/** Bills and payments: the Owner changes any; a Manager enters them and changes his own for 7 days. */
+const MONEY_ENTRY = new Set(["sales_bill", "payment"]);
+/** Prices and rates: the Owner only. They are set on the laptop (admin route). */
+const OWNER_ONLY = new Set(["raw_price", "sale_price", "product_vat", "daily_wage", "nea_tariff"]);
 
 /** A column that records who did it. It must be the signed-in person, or unchanged. */
 const WHO = new Set([
   "entered_by", "by", "gate_by", "on_duty_by", "registered_by", "checked_by", "set_by",
-  "out_by", "started_by", "finished_by", "reported_by", "returned_by",
+  "out_by", "started_by", "finished_by", "reported_by", "returned_by", "changed_by",
+  "pass_by", "requested_by", "approved_by", "ordered_by", "received_by",
 ]);
 
 const Op = z.object({
@@ -143,9 +222,9 @@ function recordId(t: TableMeta, row: Record<string, unknown>): string {
 const plain = (o: unknown) => (o == null ? undefined : (JSON.parse(JSON.stringify(o)) as Prisma.InputJsonValue));
 
 /** Setup lists: only management edits these, from the laptop. */
-const SETUP = new Set(["shift", "machine", "stop_reason", "log_field", "material", "yard", "opening_stock"]);
+const SETUP = new Set(["shift", "machine", "stop_reason", "log_field", "material", "yard", "opening_stock", "vehicle", "driver_vehicle", "pm_task", "phone_screen", "raw_price", "sale_price", "product_vat", "moisture_standard", "daily_wage", "nea_tariff", "setting"]);
 /** The only rows that may be removed: a tick or a role. Everything else is corrected, never deleted. */
-const REMOVABLE = new Set(["person_role", "operator_machine"]);
+const REMOVABLE = new Set(["person_role", "operator_machine", "driver_vehicle"]);
 
 async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[] }, admin = false) {
   const t = TABLES[op.table];
@@ -154,6 +233,9 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
   // The admin route is already limited to Owner and Manager; it may correct any Phase 1 table.
   if (!admin && !who.roles.some((r) => MANAGEMENT.includes(r) || rule!.roles.includes(r))) throw new Reject("Not allowed");
   if (op.op === "delete" && !(rule?.del || (admin && REMOVABLE.has(op.table)))) throw new Reject("Nothing is deleted; correct it instead");
+  if (OWNER_ONLY.has(op.table) && !who.roles.includes("Owner")) throw new Reject("Only the Owner sets prices and rates");
+  if (op.table === "setting" && OWNER_SETTINGS.includes(String(op.data.key)) && !who.roles.includes("Owner")) throw new Reject("Only the Owner changes this");
+  if (MONEY_ENTRY.has(op.table) && !isAdmin(who.roles)) throw new Reject("Only the Owner or a Manager enters bills and payments");
   // Giving or taking away a role: who may do it depends on the role (see roles.ts).
   if (op.table === "person_role") {
     const err = roleChangeError(who.roles, String(op.data.role));
@@ -174,6 +256,7 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
     if (op.op === "delete") {
       if (!old) return;
       if (op.table === "person_role" && !isMgmt) throw new Reject("Only the supervisor can change roles");
+      if (op.table === "log_reading" && !isMgmt && old.by !== who.id) throw new Reject("You can delete only your own reading");
       await d.delete({ where });
       await tx.audit_log.create({
         data: { table_name: op.table, record_id: recordId(t, old), action: "delete", old_values: plain(old), by: who.id, at: new Date() },
@@ -181,6 +264,7 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       return;
     }
 
+    if (op.table === "log_reading" && old && !isMgmt && old.by !== who.id) throw new Reject("You can change only your own reading");
     if (!isMgmt && old && (op.table === "person" || op.table === "person_role")) {
       throw new Reject("Only the supervisor can change registered details");
     }
@@ -232,6 +316,34 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       }
     }
 
+    // Bills and payments: a Manager changes only his own entry, within 7 days. Who changed it, and when, is kept.
+    if (MONEY_ENTRY.has(op.table)) {
+      const owner = who.roles.includes("Owner");
+      if (old && !owner && (old.entered_by !== who.id || Date.now() - new Date(String(old.entered_at)).getTime() > 7 * 86_400_000)) {
+        throw new Reject("This entry is locked. Ask the Owner to change it");
+      }
+      if (old) { op.data.changed_by = who.id; op.data.changed_at = new Date().toISOString(); }
+      if (op.table === "sales_bill") {
+        const dup = await tx.sales_bill.findFirst({
+          where: { bill_no: String(op.data.bill_no ?? old?.bill_no), NOT: { id: String(op.data.id) }, bill_date: { gte: fiscalStart(new Date(String(op.data.bill_date ?? old?.bill_date))) } },
+          select: { id: true },
+        });
+        if (dup) throw new Reject("This bill no. is already entered this fiscal year");
+      }
+    }
+    // Purchase requests: anyone asks; the Owner or a Manager approves; the store (or management) orders and receives.
+    if (op.table === "purchase_request" && "status" in op.data && op.data.status !== old?.status) {
+      const s = String(op.data.status);
+      if (!old && s !== "Requested") throw new Reject("A request starts as Requested");
+      if ((s === "Approved" || s === "Rejected") && !isAdmin(who.roles)) throw new Reject("Only the Owner or a Manager approves a request");
+      if ((s === "Ordered" || s === "Received") && !isMgmt && !who.roles.includes("Store")) throw new Reject("Only the store orders and receives");
+    }
+    // Rupee columns: the Owner only.
+    if (!who.roles.includes("Owner")) {
+      if (op.table === "store_item" && "rate" in op.data && op.data.rate != null && Number(op.data.rate) !== Number(old?.rate ?? NaN)) throw new Reject("Only the Owner sets rates");
+      if (op.table === "purchase_request" && "amount" in op.data && op.data.amount != null) throw new Reject("Only the Owner enters amounts");
+    }
+
     for (const [k, v] of Object.entries(op.data)) {
       if (WHO.has(k) && v != null && v !== who.id && v !== old?.[k]) throw new Reject(`${k} must be you`);
     }
@@ -264,6 +376,13 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       },
     });
   });
+}
+
+/** About 1 Shrawan (17 July): bill numbers restart here. */
+function fiscalStart(d: Date) {
+  const y = d.getUTCFullYear();
+  const start = new Date(Date.UTC(y, 6, 17));
+  return d < start ? new Date(Date.UTC(y - 1, 6, 17)) : start;
 }
 
 function explain(e: unknown, table: string): string {
