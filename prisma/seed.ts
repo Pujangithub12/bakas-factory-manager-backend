@@ -61,6 +61,17 @@ async function main() {
     await prisma.machine.upsert({ where: { tag }, update: {}, create: { tag, ...data } });
   }
 
+  // The JCB and the two tractors (only when there are no vehicles yet).
+  if ((await prisma.vehicle.count()) === 0) {
+    await prisma.vehicle.createMany({
+      data: [
+        { name: "JCB-01", type: "JCB", meter: "hours" },
+        { name: "Tractor 2365", type: "Tractor", reg_no: "02-001-TA 2365", meter: "hours" },
+        { name: "Tractor 1441", type: "Tractor", reg_no: "02-001-TA 1441", meter: "hours" },
+      ],
+    });
+  }
+
   // Only the log sheet lines named in the requirements. The rest go in through the Setup lists.
   if ((await prisma.log_field.count()) === 0) {
     await prisma.log_field.createMany({

@@ -15,6 +15,7 @@ const TABLES = meta as unknown as Record<string, TableMeta>;
 const REFERENCE = [
   "person_role", "operator_machine", "shift", "machine", "stop_reason", "log_field",
   "material", "supplier", "buyer", "yard", "opening_stock",
+  "vehicle", "driver_vehicle",
 ] as const;
 
 export const syncRouter = Router();
@@ -39,6 +40,8 @@ syncRouter.get("/sync/pull", async (req, res) => {
     yard_batch: { OR: [{ opened_at: { gte: since } }, open("finished_at")] },
     maintenance_job: { OR: [{ reported_at: { gte: since } }, open("fixed_at")] },
     weigh_ticket: { OR: [{ first_at: { gte: since } }, open("second_at")] },
+    vehicle_session: { OR: [{ started_at: { gte: since } }, open("stopped_at")] },
+    diesel_fill: { at: { gte: since } },
   };
 
   const data: Record<string, unknown[]> = {};
@@ -49,6 +52,17 @@ syncRouter.get("/sync/pull", async (req, res) => {
     ...REFERENCE.map((t) => db[t].findMany().then((r) => (data[t] = r))),
     ...Object.entries(windowed).map(([t, where]) => db[t].findMany({ where }).then((r) => (data[t] = r))),
   ]);
+
+  // The last hour meter reading of each vehicle must reach the phone even when it has been parked for days.
+  for (const v of (data.vehicle ?? []) as { id: string }[]) {
+    const [lastSession, lastFill] = await Promise.all([
+      prisma.vehicle_session.findFirst({ where: { vehicle_id: v.id }, orderBy: { started_at: "desc" } }),
+      prisma.diesel_fill.findFirst({ where: { vehicle_id: v.id }, orderBy: { at: "desc" } }),
+    ]);
+    const has = (t: string, id: string) => (data[t] as { id: string }[]).some((r) => r.id === id);
+    if (lastSession && !has("vehicle_session", lastSession.id)) data.vehicle_session.push(lastSession);
+    if (lastFill && !has("diesel_fill", lastFill.id)) data.diesel_fill.push(lastFill);
+  }
 
   // Challan numbers restart each fiscal year (1 Shrawan, about 17 July). A phone only holds a few
   // days of tickets, so the server says where the numbering has reached.
@@ -85,6 +99,9 @@ const WRITE: Record<string, Rule> = {
   person: { roles: [...GATE] },
   person_role: { roles: [...GATE], del: true }, // a supervisor can correct a worker's role (see the delete check below)
   operator_machine: { roles: [], del: true },
+  driver_vehicle: { roles: [], del: true }, // the supervisor ticks which vehicles each driver may drive
+  vehicle_session: { roles: ["Driver"] },
+  diesel_fill: { roles: ["Driver"] },
   attendance: { roles: [...GATE] },
   shift_in_charge: { roles: [] },
   machine_run: { roles: [...FIELD_STAFF] },
@@ -199,6 +216,8 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
         select: { id: true },
       });
       if (running) throw new Reject("Still running a machine. Stop the run before checking out.");
+      const driving = await tx.vehicle_session.findFirst({ where: { stopped_at: null, driver_id: pid }, select: { id: true } });
+      if (driving) throw new Reject("Still working a vehicle. Stop the work before checking out.");
     }
 
     // Starting a machine: the operator themselves, on a machine the supervisor has ticked for them.
@@ -213,6 +232,64 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       const ticked = await tx.operator_machine.findUnique({ where: { person_id_machine_id: { person_id: who.id, machine_id: machineId } } });
       if (!everyOperator && !ticked) throw new Reject("You are not allowed to run this machine. Ask the supervisor to tick it for you.");
     }
+    // Vehicles: the driver starts, stops and fuels their own vehicle, on one the supervisor has ticked for them.
+    // The hour meter never goes down, and the hours cannot be more than the time that has passed.
+    if (op.table === "vehicle_session" || op.table === "diesel_fill") {
+      if (!isMgmt && !who.roles.includes("Driver")) throw new Reject("Only a driver can log vehicle work or diesel");
+      const vehicleId = String(op.data.vehicle_id ?? old?.vehicle_id);
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      const lastMeter = async (skipSession?: string): Promise<number | null> => {
+        const [ls, lf] = await Promise.all([
+          tx.vehicle_session.findFirst({ where: { vehicle_id: vehicleId, ...(skipSession ? { id: { not: skipSession } } : {}) }, orderBy: { started_at: "desc" } }),
+          tx.diesel_fill.findFirst({ where: { vehicle_id: vehicleId, meter: { not: null } }, orderBy: { at: "desc" } }),
+        ]);
+        let best: { at: number; v: number } | null = null;
+        if (ls) {
+          const v = num(ls.meter_end ?? ls.meter_start);
+          if (v != null && !Number.isNaN(v)) best = { at: (ls.stopped_at ?? ls.started_at).getTime(), v };
+        }
+        if (lf && (!best || lf.at.getTime() > best.at)) best = { at: lf.at.getTime(), v: Number(lf.meter) };
+        return best ? best.v : null;
+      };
+      if (!isMgmt && !old) {
+        const ticked = await tx.driver_vehicle.findUnique({ where: { person_id_vehicle_id: { person_id: who.id, vehicle_id: vehicleId } } });
+        if (!ticked) throw new Reject("You are not set up on this vehicle. Ask the supervisor to tick it for you.");
+      }
+
+      if (op.table === "vehicle_session") {
+        if (!old) {
+          const start = num(op.data.meter_start);
+          if (start == null || Number.isNaN(start)) throw new Reject("Enter the hour meter reading");
+          if (!isMgmt && op.data.driver_id !== who.id) throw new Reject("Work is started by the driver themselves");
+          if (op.data.stopped_at == null) {
+            const open = await tx.vehicle_session.findFirst({ where: { vehicle_id: vehicleId, stopped_at: null }, select: { id: true } });
+            if (open) throw new Reject("This vehicle is already working");
+          }
+          const last = await lastMeter();
+          if (last != null && start < last) throw new Reject(`The meter cannot be below the last reading (${last})`);
+        } else {
+          if (!isMgmt && old.driver_id !== who.id) throw new Reject("A vehicle that is working belongs to the driver who started it");
+          const end = num(op.data.meter_end);
+          if (end != null) {
+            const start = Number(old.meter_start);
+            if (end < start) throw new Reject(`The meter cannot be below the start reading (${start})`);
+            const stopped = new Date(String(op.data.stopped_at ?? new Date().toISOString())).getTime();
+            const hours = (stopped - (old.started_at as Date).getTime()) / 3_600_000;
+            if (end - start > hours + 0.5) throw new Reject(`That is ${(end - start).toFixed(1)} hours on the meter, but work started only ${hours.toFixed(1)} hours ago. Check the reading.`);
+          }
+        }
+      } else {
+        const litres = num(op.data.litres ?? old?.litres);
+        if (litres == null || !(litres > 0 && litres <= 500)) throw new Reject("Enter the litres filled (1 to 500)");
+        const meter = num(op.data.meter ?? old?.meter);
+        if (meter == null || Number.isNaN(meter)) throw new Reject("Enter the hour meter reading");
+        if (!old) {
+          const last = await lastMeter();
+          if (last != null && meter < last) throw new Reject(`The meter cannot be below the last reading (${last})`);
+        }
+      }
+    }
+
     // Anyone may report a problem, but only a fitter (or management) may change an existing job.
     if (op.table === "maintenance_job" && old && !isMgmt && !who.roles.includes("Fitter")) {
       throw new Reject("Only a fitter can change a maintenance job");
