@@ -8,6 +8,8 @@ import meta from "./meta.json";
 
 type TableMeta = { phase: number; pk: string[]; cols: Record<string, { type: string; opt: boolean; fk?: string }> };
 const TABLES = meta as unknown as Record<string, TableMeta>;
+/** Own keys only: a name such as "constructor" must not find anything on Object.prototype. */
+const own = <T>(o: Record<string, T>, k: string): T | undefined => (Object.hasOwn(o, k) ? o[k] : undefined);
 
 // ---------------------------------------------------------------- pull ----
 
@@ -26,7 +28,9 @@ export const syncRouter = Router();
 syncRouter.use(requireAuth);
 
 syncRouter.get("/sync/pull", async (req, res) => {
-  const days = Math.min(Math.max(Number(req.query.days) || 3, 1), 400);
+  // Management reads the whole year on the dashboards. Everyone else's screens need a few days, so a phone cannot ask for more.
+  const mgmt = req.auth!.roles.some((r) => MANAGEMENT.includes(r));
+  const days = Math.min(Math.max(Number(req.query.days) || 3, 1), mgmt ? 400 : 31);
   const since = new Date(Date.now() - days * 86_400_000);
   const open = (col: string) => ({ [col]: null });
 
@@ -87,8 +91,8 @@ syncRouter.get("/sync/pull", async (req, res) => {
   const data: Record<string, unknown[]> = {};
   const db = prisma as unknown as Record<string, { findMany(a?: object): Promise<unknown[]> }>;
   await Promise.all([
-    // pin_hash, email and token_version never leave the server
-    prisma.person.findMany({ omit: { pin_hash: true, email: true, token_version: true } }).then((r) => (data.person = r)),
+    // pin_hash, email and token_version never leave the server. ID numbers and addresses go only to those who register and confirm workers.
+    prisma.person.findMany({ omit: { pin_hash: true, email: true, token_version: true, ...(mgmt || req.auth!.roles.includes("Security") ? {} : { id_no: true, address: true }) } }).then((r) => (data.person = r)),
     ...REFERENCE.map((t) => db[t].findMany().then((r) => (data[t] = r))),
     ...Object.entries(windowed).map(([t, where]) => db[t].findMany({ where }).then((r) => (data[t] = r))),
     prisma.store_item.findMany({ omit: owner ? {} : { rate: true } }).then((r) => (data.store_item = r)),
@@ -114,21 +118,23 @@ syncRouter.get("/sync/pull", async (req, res) => {
   const now = new Date();
   let fyStart = new Date(Date.UTC(now.getUTCFullYear(), 6, 17));
   if (now < fyStart) fyStart = new Date(Date.UTC(now.getUTCFullYear() - 1, 6, 17));
-  const sold = await prisma.weigh_ticket.findMany({
-    where: { direction: "out", challan_no: { not: null }, first_at: { gte: fyStart } },
-    select: { challan_no: true },
-  });
+  // The highest challan number of the year, found by the database (POSIX classes: backslashes do not survive a tagged template).
+  const [top] = await prisma.$queryRaw<{ challan_no: string }[]>`
+    SELECT challan_no FROM weigh_ticket
+    WHERE direction = 'out' AND first_at >= ${fyStart} AND challan_no ~ '[[:digit:]][[:space:]]*$'
+    ORDER BY length(ltrim(substring(challan_no from '([[:digit:]]+)[[:space:]]*$'), '0')) DESC,
+             ltrim(substring(challan_no from '([[:digit:]]+)[[:space:]]*$'), '0') DESC
+    LIMIT 1`;
   let last: number | null = null;
   let prefix: string | null = null;
-  for (const { challan_no } of sold) {
-    const m = /^(.*?)(\d+)\s*$/.exec(challan_no ?? "");
-    if (m && (last === null || Number(m[2]) > last)) {
-      last = Number(m[2]);
-      prefix = m[1];
-    }
+  const m = top ? /^(.*?)(\d+)\s*$/.exec(top.challan_no) : null;
+  if (m) {
+    last = Number(m[2]);
+    prefix = m[1];
   }
 
-  res.json({ server_time: now.toISOString(), me: req.auth, challan: { last, prefix, fy_start: fyStart.toISOString() }, tables: data });
+  const { tv: _tv, ...caller } = req.auth!;
+  res.json({ server_time: now.toISOString(), me: caller, challan: { last, prefix, fy_start: fyStart.toISOString() }, tables: data });
 });
 
 // ---------------------------------------------------------------- push ----
@@ -202,15 +208,46 @@ function whereOf(t: TableMeta, data: Record<string, unknown>) {
   return { [t.pk.join("_")]: Object.fromEntries(t.pk.map((k) => [k, toDb(t, k, data[k])])) };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_TEXT = 20_000;
+
+/** Checks a value against its column (so a bad entry gets a plain reason, not "Could not save") and converts it. */
 function toDb(t: TableMeta, col: string, v: unknown) {
-  if (v == null) return null;
-  const type = t.cols[col].type;
+  const c = t.cols[col];
+  if (v == null) {
+    if (!c.opt && !t.pk.includes(col)) throw new Reject(`${col} is required`);
+    return null;
+  }
+  const type = c.type;
   if (type === "ts" || type === "date" || type === "time") {
-    const d = new Date(String(v));
+    if (typeof v !== "string" && typeof v !== "number") throw new Reject(`Bad date in ${col}`);
+    const d = new Date(v);
     if (isNaN(d.getTime())) throw new Reject(`Bad date in ${col}`);
     return d;
   }
-  return v;
+  if (type === "uuid") {
+    if (typeof v !== "string" || !UUID.test(v)) throw new Reject(`Bad id in ${col}`);
+    return v;
+  }
+  if (type === "text") {
+    if (typeof v !== "string" || v.length > MAX_TEXT) throw new Reject(`Bad text in ${col}`);
+    return v;
+  }
+  if (type === "bool") {
+    if (typeof v !== "boolean") throw new Reject(`${col} must be true or false`);
+    return v;
+  }
+  if (type === "int") {
+    if (typeof v !== "number" || !Number.isInteger(v) || Math.abs(v) > 2_147_483_647) throw new Reject(`${col} must be a whole number`);
+    return v;
+  }
+  const num = /^num(\d+)\.(\d+)$/.exec(type);
+  if (num) {
+    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    if (!Number.isFinite(n) || Math.abs(n) >= 10 ** (Number(num[1]) - Number(num[2]))) throw new Reject(`${col} is not a valid number`);
+    return v;
+  }
+  return v; // json
 }
 
 function recordId(t: TableMeta, row: Record<string, unknown>): string {
@@ -221,6 +258,12 @@ function recordId(t: TableMeta, row: Record<string, unknown>): string {
 }
 
 const plain = (o: unknown) => (o == null ? undefined : (JSON.parse(JSON.stringify(o)) as Prisma.InputJsonValue));
+/** Columns that must never be copied into the audit log. */
+const NOT_LOGGED: Record<string, string[]> = { person: ["pin_hash", "email", "token_version"] };
+const logged = (table: string, row: Record<string, unknown> | null | undefined) => {
+  const drop = own(NOT_LOGGED, table);
+  return row && drop ? Object.fromEntries(Object.entries(row).filter(([k]) => !drop.includes(k))) : row;
+};
 
 /** Setup lists: only management edits these, from the laptop. */
 const SETUP = new Set(["shift", "machine", "stop_reason", "log_field", "material", "yard", "opening_stock", "vehicle", "driver_vehicle", "pm_task", "phone_screen", "raw_price", "sale_price", "product_vat", "moisture_standard", "daily_wage", "nea_tariff", "setting"]);
@@ -228,8 +271,8 @@ const SETUP = new Set(["shift", "machine", "stop_reason", "log_field", "material
 const REMOVABLE = new Set(["person_role", "operator_machine", "driver_vehicle"]);
 
 async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[] }, admin = false) {
-  const t = TABLES[op.table];
-  const rule = WRITE[op.table];
+  const t = own(TABLES, op.table);
+  const rule = own(WRITE, op.table);
   if (!t || (!rule && !(admin && SETUP.has(op.table)))) throw new Reject(`${op.table} cannot be changed from here`);
   // The admin route is already limited to Owner and Manager; it may correct any Phase 1 table.
   if (!admin && !who.roles.some((r) => MANAGEMENT.includes(r) || rule!.roles.includes(r))) throw new Reject("Not allowed");
@@ -243,7 +286,7 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
     if (err) throw new Reject(err);
   }
 
-  const unknown = Object.keys(op.data).filter((k) => !t.cols[k]);
+  const unknown = Object.keys(op.data).filter((k) => !Object.hasOwn(t.cols, k));
   if (unknown.length) throw new Reject(`Unknown column ${unknown.join(", ")}`);
   if (op.table === "person" && "pin_hash" in op.data) throw new Reject("PIN is set from the PIN screen");
   if (op.table === "person" && ("email" in op.data || "token_version" in op.data)) throw new Reject("Email is set from the PIN screen");
@@ -261,12 +304,37 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       if (op.table === "log_reading" && !isMgmt && old.by !== who.id) throw new Reject("You can delete only your own reading");
       await d.delete({ where });
       await tx.audit_log.create({
-        data: { table_name: op.table, record_id: recordId(t, old), action: "delete", old_values: plain(old), by: who.id, at: new Date() },
+        data: { table_name: op.table, record_id: recordId(t, old), action: "delete", old_values: plain(logged(op.table, old)), by: who.id, at: new Date() },
       });
       return;
     }
 
     if (op.table === "log_reading" && old && !isMgmt && old.by !== who.id) throw new Reject("You can change only your own reading");
+    // A guard registers a new worker with a role. Giving a role to someone already confirmed (or to the guard themselves) is for the supervisor.
+    if (op.table === "person_role" && !old && !isMgmt) {
+      const target = await tx.person.findUnique({ where: { id: String(op.data.person_id) }, select: { checked: true } });
+      if (!target || target.checked) throw new Reject("Only the supervisor can give a role to someone who is already confirmed");
+    }
+    // A run is changed by the operator who runs it (or a helper on it), and never moved to another operator or machine.
+    if (op.table === "machine_run" && old && !isMgmt) {
+      const helper = old.operator_id !== who.id && (await tx.run_helper.findUnique({ where: { run_id_person_id: { run_id: String(old.id), person_id: who.id } } }));
+      if (old.operator_id !== who.id && !helper) throw new Reject("You can change only a run you are on");
+      for (const k of ["operator_id", "machine_id", "entered_by"]) {
+        if (k in op.data && op.data[k] !== old[k]) throw new Reject("Who runs a run, and on which machine, cannot be changed");
+      }
+      if ("started_at" in op.data && new Date(String(op.data.started_at)).getTime() !== new Date(String(old.started_at)).getTime()) throw new Reject("The start time of a run cannot be changed");
+    }
+    // A driver's own sessions and fills, on vehicles the supervisor has ticked for them.
+    if (!isMgmt && (op.table === "vehicle_session" || op.table === "diesel_fill")) {
+      const ownerCol = op.table === "vehicle_session" ? "driver_id" : "by";
+      if (old ? old[ownerCol] !== who.id : op.data[ownerCol] !== who.id) throw new Reject("This belongs to the driver themselves");
+      if (old && ownerCol in op.data && op.data[ownerCol] !== old[ownerCol]) throw new Reject("This belongs to the driver themselves");
+      if (!old) {
+        const vehicleId = String(op.data.vehicle_id);
+        const ticked = await tx.driver_vehicle.findUnique({ where: { person_id_vehicle_id: { person_id: who.id, vehicle_id: vehicleId } } });
+        if (!ticked) throw new Reject("You are not allowed to drive this vehicle. Ask the supervisor to tick it for you.");
+      }
+    }
     if (!isMgmt && old && (op.table === "person" || op.table === "person_role")) {
       throw new Reject("Only the supervisor can change registered details");
     }
@@ -371,8 +439,8 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
         table_name: op.table,
         record_id: recordId(t, saved ?? values),
         action: old ? "update" : "insert",
-        old_values: plain(old),
-        new_values: plain(saved),
+        old_values: plain(logged(op.table, old)),
+        new_values: plain(logged(op.table, saved)),
         by: who.id,
         at: new Date(),
       },

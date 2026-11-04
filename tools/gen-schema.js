@@ -463,6 +463,43 @@ for (const raw of SPEC.split("\n")) {
 }
 
 const names = new Set(tables.map((t) => t.name));
+
+// Indexes for what the sync pull and sign-in ask for on every call: rows in a time window, the latest per machine or
+// task, and a person's own rows. Primary keys and unique columns already have one, and so does the first column of a
+// compound key (run_helper, prestart_answer, run_bypass on run_id).
+const INDEXES = {
+  person_role: [["role"]],
+  shift_in_charge: [["person_id", "shift_start"]],
+  attendance: [["shift_start"], ["person_id", "shift_start"]],
+  machine_run: [["started_at"], ["operator_id", "stopped_at"], ["machine_id", "started_at"]],
+  run_helper: [["person_id"]],
+  downtime: [["started_at"], ["machine_id", "started_at"]],
+  log_reading: [["at"], ["machine_id", "at"]],
+  greasing_check: [["at"]],
+  bag_count: [["period_to"]],
+  yard_batch: [["opened_at"]],
+  maintenance_job: [["reported_at"], ["machine_id"]],
+  weigh_ticket: [["first_at"], ["direction", "first_at"]],
+  lab_test: [["ticket_id"]],
+  sales_bill: [["ticket_id"], ["bill_date"]],
+  vehicle_session: [["started_at"], ["driver_id", "started_at"]],
+  diesel_fill: [["at"], ["vehicle_id", "at"]],
+  hour_meter_reading: [["at"], ["machine_id", "at"]],
+  pm_done: [["done_at"], ["task_id", "done_at"]],
+  store_movement: [["at"]],
+  visitor: [["time_in"]],
+  purchase_request: [["requested_at"], ["status"]],
+  purchase_request_line: [["pr_id"]],
+  power_reading: [["at"]],
+  payment: [["at"]],
+  audit_log: [["table_name", "record_id"], ["at"]],
+  pin_reset: [["person_id"]],
+};
+for (const [tn, list] of Object.entries(INDEXES)) {
+  const t = tables.find((x) => x.name === tn);
+  if (!t) throw new Error(`index on unknown table ${tn}`);
+  for (const cols of list) for (const c of cols) if (!t.cols.some((x) => x.name === c)) throw new Error(`index on unknown column ${tn}.${c}`);
+}
 const back = {}; // target table -> list of back-relation lines
 
 function prismaType(c) {
@@ -537,6 +574,9 @@ for (const t of tables) {
   }
   for (const b of back[t.name] || []) out += b + "\n";
   if (pks.length > 1) out += `\n  @@id([${pks.map((c) => c.name).join(", ")}])\n`;
+  const ix = INDEXES[t.name] || [];
+  if (ix.length && pks.length <= 1) out += "\n";
+  for (const cols of ix) out += `  @@index([${cols.join(", ")}])\n`;
   out += `}\n`;
 }
 

@@ -1,14 +1,23 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import { createHash, randomBytes } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "./prisma";
 import { canManage } from "./roles";
 import { publicUrl, sendMail } from "./mail";
+import { env } from "./env";
+import { Counters } from "./limits";
 
-const SECRET = process.env.JWT_SECRET;
-if (!SECRET) throw new Error("JWT_SECRET is not set in .env");
+const SECRET = env.jwtSecret;
+/** The one signing method used and accepted. Pinning it refuses tokens that name another (or "none"). */
+const JWT_ALG = "HS256" as const;
+const signToken = (id: string, tv: number) => jwt.sign({ sub: id, tv }, SECRET, { algorithm: JWT_ALG, expiresIn: "30d" });
+/**
+ * bcrypt work factor (the OWASP minimum). Sign-in tries every person who holds the role, so a higher factor
+ * makes every sign-in slower; the real protection against guessing is the lockout below, not the hash speed.
+ */
+const BCRYPT_COST = 10;
 
 export type Auth = { id: string; name: string; roles: string[]; tv: number };
 
@@ -24,39 +33,52 @@ declare global {
 export const MANAGEMENT = ["Owner", "Manager", "Supervisor"];
 
 /** The person in charge of the current shift gets the supervisor screens. */
-async function inChargeNow(personId: string): Promise<boolean> {
-  const from = new Date(Date.now() - 12 * 3600_000);
-  const row = await prisma.shift_in_charge.findFirst({
-    where: { person_id: personId, shift_start: { gte: from, lte: new Date() } },
-    select: { shift_start: true },
-  });
-  return !!row;
-}
+const IN_CHARGE_HOURS = 12;
 
 export async function loadAuth(personId: string): Promise<Auth | null> {
+  const now = Date.now();
+  // One query: the person, their roles, and whether they were put in charge of a shift in the last 12 hours.
   const p = await prisma.person.findUnique({
     where: { id: personId },
-    select: { id: true, full_name: true, active: true, token_version: true, person_role_person_id_back: { select: { role: true } } },
+    select: {
+      id: true,
+      full_name: true,
+      active: true,
+      token_version: true,
+      person_role_person_id_back: { select: { role: true } },
+      shift_in_charge_person_id_back: {
+        where: { shift_start: { gte: new Date(now - IN_CHARGE_HOURS * 3600_000), lte: new Date(now) } },
+        select: { shift_start: true },
+        take: 1,
+      },
+    },
   });
   if (!p || !p.active) return null;
   const roles = p.person_role_person_id_back.map((r) => r.role);
-  if (!roles.includes("Supervisor") && (await inChargeNow(p.id))) roles.push("Supervisor");
+  if (!roles.includes("Supervisor") && p.shift_in_charge_person_id_back.length) roles.push("Supervisor");
   return { id: p.id, name: p.full_name, roles, tv: p.token_version };
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
   if (!m) return res.status(401).json({ error: "Sign in required" });
+  let sub: string, tv: number | undefined;
   try {
-    const { sub, tv } = jwt.verify(m[1], SECRET!) as { sub: string; tv?: number };
+    ({ sub, tv } = jwt.verify(m[1], SECRET, { algorithms: [JWT_ALG] }) as { sub: string; tv?: number });
+  } catch {
+    return res.status(401).json({ error: "Session expired, sign in again" });
+  }
+  try {
     const auth = await loadAuth(sub);
     if (!auth) return res.status(401).json({ error: "Account is inactive" });
     // A PIN change raises token_version, which ends every session signed in before it.
     if ((tv ?? 0) !== auth.tv) return res.status(401).json({ error: "Your PIN was changed. Sign in again" });
     req.auth = auth;
     next();
-  } catch {
-    res.status(401).json({ error: "Session expired, sign in again" });
+  } catch (e) {
+    // The database is down or slow. That is not a bad sign-in: a 401 would sign everybody out. Tell the app to retry.
+    console.error("auth lookup failed", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "The server is busy. Try again in a moment." });
   }
 }
 
@@ -96,7 +118,7 @@ authRouter.post("/auth/setup", async (req, res) => {
   if (!body.success) return res.status(400).json({ error: `Enter your name and a ${PIN_LENGTH}-digit PIN` });
   const weak = weakPin(body.data.pin);
   if (weak) return res.status(400).json({ error: weak });
-  const pin_hash = await bcrypt.hash(body.data.pin, 10);
+  const pin_hash = await bcrypt.hash(body.data.pin, BCRYPT_COST);
   const full_name = body.data.full_name.replace(/\s+/g, " ");
   try {
     const id = await prisma.$transaction(
@@ -111,7 +133,7 @@ authRouter.post("/auth/setup", async (req, res) => {
       { isolationLevel: "Serializable" }
     );
     const auth = await loadAuth(id);
-    const token = jwt.sign({ sub: id, tv: auth!.tv }, SECRET!, { expiresIn: "30d" });
+    const token = signToken(id, auth!.tv);
     res.json({ token, person: { id: auth!.id, full_name: auth!.name }, roles: auth!.roles });
   } catch (e) {
     if (e instanceof Error && e.message === "exists") return res.status(409).json({ error: "The Owner is already set up. Sign in instead." });
@@ -147,26 +169,22 @@ authRouter.get("/auth/people", async (_req, res) => {
   );
 });
 
-type Counter = { n: number; until: number };
-const isLocked = (m: Map<string, Counter>, k: string) => (m.get(k)?.until ?? 0) > Date.now();
-function registerFailure(m: Map<string, Counter>, k: string, max: number) {
-  const t = m.get(k);
-  // Start counting again only after a lockout has run out (until === 0 means "not locked").
-  const over = !!t && t.until !== 0 && t.until <= Date.now();
-  const n = (over ? 0 : t?.n ?? 0) + 1;
-  m.set(k, { n, until: n >= max ? Date.now() + LOCK_MS : 0 });
-}
-const byClient = new Map<string, Counter>(); // one phone trying one role: 5 wrong PINs
-const byTarget = new Map<string, Counter>(); // anyone trying one role: 25 wrong PINs, so one phone cannot lock the Owner out for long
+const byClient = new Counters(LOCK_MS); // one phone trying one role: 5 wrong PINs
+const byTarget = new Counters(LOCK_MS); // anyone trying one role: 25 wrong PINs, so one phone cannot lock the Owner out for long
 
 /** Is this PIN already someone's? PINs are unique, because sign-in finds the person from the role and the PIN. */
 export async function pinInUse(pin: string, exceptId?: string): Promise<boolean> {
   const others = await prisma.person.findMany({
     where: { pin_hash: { not: null }, ...(exceptId ? { NOT: { id: exceptId } } : {}) },
-    select: { pin_hash: true },
+    select: { id: true, pin_hash: true },
   });
-  for (const o of others) if (await bcrypt.compare(pin, o.pin_hash!)) return true;
-  return false;
+  return (await whoseHash(pin, others)) !== null;
+}
+
+/** Which of these people has this PIN? bcrypt runs on the worker threads, so all are checked at once and none block the server. */
+async function whoseHash(pin: string, people: { id: string; pin_hash: string | null }[]): Promise<string | null> {
+  const hits = await Promise.all(people.map(async (p) => ((await bcrypt.compare(pin, p.pin_hash!)) ? p.id : null)));
+  return hits.find((id) => id !== null) ?? null;
 }
 
 /** Sign in with a role and a PIN: the person is the one holding that role whose PIN this is. */
@@ -178,25 +196,22 @@ authRouter.post("/auth/login", async (req, res) => {
 
   const target = role ?? person_id!;
   const clientKey = `${req.ip}|${target}`;
-  if (isLocked(byClient, clientKey) || isLocked(byTarget, target)) return res.status(429).json({ error: "Too many wrong tries. Wait 15 minutes." });
+  if (byClient.locked(clientKey) || byTarget.locked(target)) return res.status(429).json({ error: "Too many wrong tries. Wait 15 minutes." });
 
   const people = await prisma.person.findMany({
     where: { active: true, pin_hash: { not: null }, ...(person_id ? { id: person_id } : { person_role_person_id_back: { some: { role } } }) },
     select: { id: true, pin_hash: true },
   });
-  let found: string | null = null;
-  for (const p of people) {
-    if (await bcrypt.compare(pin, p.pin_hash!)) { found = p.id; break; }
-  }
+  const found = await whoseHash(pin, people);
   if (!found) {
-    registerFailure(byClient, clientKey, MAX_TRIES);
-    registerFailure(byTarget, target, 25);
+    byClient.fail(clientKey, MAX_TRIES, LOCK_MS);
+    byTarget.fail(target, 25, LOCK_MS);
     return res.status(401).json({ error: "Wrong PIN" });
   }
-  byClient.delete(clientKey);
+  byClient.clear(clientKey);
 
   const auth = await loadAuth(found);
-  const token = jwt.sign({ sub: found, tv: auth!.tv }, SECRET!, { expiresIn: "30d" });
+  const token = signToken(found, auth!.tv);
   res.json({ token, person: { id: auth!.id, full_name: auth!.name }, roles: auth!.roles });
 });
 /** Set or reset someone's PIN. */
@@ -214,7 +229,7 @@ authRouter.post("/people/:id/pin", requireAuth, requireRole(...MANAGEMENT), asyn
   }
   if (await pinInUse(body.data.pin, id)) return res.status(409).json({ error: "That PIN is already used by someone else. Choose another." });
   await prisma.$transaction([
-    prisma.person.update({ where: { id }, data: { pin_hash: await bcrypt.hash(body.data.pin, 10), token_version: { increment: 1 } } }),
+    prisma.person.update({ where: { id }, data: { pin_hash: await bcrypt.hash(body.data.pin, BCRYPT_COST), token_version: { increment: 1 } } }),
     // The hash itself is not copied into the log.
     prisma.audit_log.create({
       data: { table_name: "person", record_id: id, action: "update", new_values: { pin: "changed" }, by: req.auth!.id, at: new Date() },
@@ -229,16 +244,10 @@ authRouter.post("/people/:id/pin", requireAuth, requireRole(...MANAGEMENT), asyn
 const RESET_MINUTES = 20;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/; // 32 random bytes, base64url
-const forgotByIp = new Map<string, { n: number; start: number }>();
-const forgotByEmail = new Map<string, { n: number; start: number }>();
+const HOUR = 3_600_000;
+const forgot = new Counters(HOUR);
 /** At most `max` in an hour. Returns true when this one is over the limit. */
-function overLimit(m: Map<string, { n: number; start: number }>, k: string, max: number): boolean {
-  const now = Date.now();
-  const t = m.get(k);
-  if (!t || now - t.start > 3_600_000) { m.set(k, { n: 1, start: now }); return false; }
-  t.n += 1;
-  return t.n > max;
-}
+const overLimit = (k: string, max: number) => forgot.hit(k, max);
 
 /** The same answer whether or not the address belongs to an account, so nobody can use this to find out who has one. */
 const FORGOT_REPLY = { message: "If that account exists, we have sent a link to reset the PIN." };
@@ -250,7 +259,7 @@ authRouter.post("/auth/forgot", async (req, res) => {
   if (!body.success) return;
   const email = body.data.email;
   // Too many asks from one place, or for one address, are ignored quietly (still the same reply).
-  if (overLimit(forgotByIp, req.ip ?? "?", 10) || overLimit(forgotByEmail, email, 3)) return;
+  if (overLimit(`ip|${req.ip}`, 10) || overLimit(`mail|${email}`, 3)) return;
   try {
     const p = await prisma.person.findUnique({ where: { email }, select: { id: true, full_name: true, active: true, pin_hash: true } });
     if (!p || !p.active || !p.pin_hash) return;
@@ -277,7 +286,7 @@ authRouter.post("/auth/reset", async (req, res) => {
   const body = z.object({ token: z.string().regex(TOKEN_RE), pin: z.string().regex(PIN_RE) }).safeParse(req.body);
   const BAD = "This link has expired or was already used. Ask for a new one.";
   if (!body.success) return res.status(400).json({ error: `Enter a ${PIN_LENGTH}-digit PIN` });
-  if (overLimit(forgotByIp, `reset|${req.ip}`, 20)) return res.status(429).json({ error: "Too many tries. Wait a while." });
+  if (overLimit(`reset|${req.ip}`, 20)) return res.status(429).json({ error: "Too many tries. Wait a while." });
   const row = await prisma.pin_reset.findUnique({ where: { token_hash: sha256(body.data.token) } });
   if (!row || row.used_at || row.expires_at.getTime() < Date.now()) return res.status(400).json({ error: BAD });
   const person = await prisma.person.findUnique({ where: { id: row.person_id }, select: { id: true, active: true, email: true, full_name: true } });
@@ -285,7 +294,7 @@ authRouter.post("/auth/reset", async (req, res) => {
   const weak = weakPin(body.data.pin);
   if (weak) return res.status(400).json({ error: weak });
   if (await pinInUse(body.data.pin, person.id)) return res.status(409).json({ error: "That PIN is already used by someone else. Choose another." });
-  const pin_hash = await bcrypt.hash(body.data.pin, 10);
+  const pin_hash = await bcrypt.hash(body.data.pin, BCRYPT_COST);
   const now = new Date();
   try {
     await prisma.$transaction(async (tx) => {
@@ -317,7 +326,7 @@ authRouter.get("/reset", (req, res) => {
   res.set({
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   });
   res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reset PIN</title>
 <style>body{font-family:system-ui,sans-serif;background:#f6f4ef;margin:0;padding:24px;color:#1d2a22}main{max-width:380px;margin:8vh auto;background:#fff;border:1px solid #d9d5cc;border-radius:18px;padding:24px}

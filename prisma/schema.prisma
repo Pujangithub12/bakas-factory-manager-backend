@@ -88,6 +88,8 @@ model pin_reset {
   used_at DateTime? @db.Timestamptz(6) /// Set when the link is used; a used link never works again
   created_at DateTime @db.Timestamptz(6)
   person_id_rel person @relation("pin_reset_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+
+  @@index([person_id])
 }
 
 /// Phase 1. The jobs a person has. One person can have several. Roles decide which screens they can open.
@@ -98,6 +100,7 @@ model person_role {
   person_id_rel person @relation("person_role_person_id", fields: [person_id], references: [id], onDelete: Restrict)
 
   @@id([person_id, role])
+  @@index([role])
 }
 
 /// Phase 1. Which machines each operator may run. The supervisor ticks them.
@@ -135,6 +138,9 @@ model attendance {
   shift_id_rel shift @relation("attendance_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
   gate_by_rel person? @relation("attendance_gate_by", fields: [gate_by], references: [id], onDelete: Restrict)
   on_duty_by_rel person? @relation("attendance_on_duty_by", fields: [on_duty_by], references: [id], onDelete: Restrict)
+
+  @@index([shift_start])
+  @@index([person_id, shift_start])
 }
 
 /// Phase 1. Who is in charge of each shift. At night it changes as needed.
@@ -147,6 +153,8 @@ model shift_in_charge {
   shift_id_rel shift @relation("shift_in_charge_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
   person_id_rel person @relation("shift_in_charge_person_id", fields: [person_id], references: [id], onDelete: Restrict)
   set_by_rel person @relation("shift_in_charge_set_by", fields: [set_by], references: [id], onDelete: Restrict)
+
+  @@index([person_id, shift_start])
 }
 
 /// Phase 2. Visitor gate passes, numbered VP-0101 and on.
@@ -169,6 +177,8 @@ model visitor {
   meet_person_id_rel person? @relation("visitor_meet_person_id", fields: [meet_person_id], references: [id], onDelete: Restrict)
   pass_by_rel person @relation("visitor_pass_by", fields: [pass_by], references: [id], onDelete: Restrict)
   out_by_rel person? @relation("visitor_out_by", fields: [out_by], references: [id], onDelete: Restrict)
+
+  @@index([time_in])
 }
 
 /// Phase 1. The eight machines: DC-01, FC-01, WHM-01, DR-01, BM-01, HM-01, PM-01, BS-01.
@@ -238,6 +248,10 @@ model machine_run {
   prestart_answer_run_id_back prestart_answer[] @relation("prestart_answer_run_id")
   run_bypass_run_id_back run_bypass[] @relation("run_bypass_run_id")
   log_reading_run_id_back log_reading[] @relation("log_reading_run_id")
+
+  @@index([started_at])
+  @@index([operator_id, stopped_at])
+  @@index([machine_id, started_at])
 }
 
 /// Phase 1. Helpers on a run. Only people checked in and not on another machine.
@@ -248,6 +262,7 @@ model run_helper {
   person_id_rel person @relation("run_helper_person_id", fields: [person_id], references: [id], onDelete: Restrict)
 
   @@id([run_id, person_id])
+  @@index([person_id])
 }
 
 /// Phase 1. The yes/no checks answered at every start.
@@ -288,6 +303,9 @@ model downtime {
   job_id_rel maintenance_job? @relation("downtime_job_id", fields: [job_id], references: [id], onDelete: Restrict)
   entered_by_rel person @relation("downtime_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
   maintenance_job_downtime_id_back maintenance_job[] @relation("maintenance_job_downtime_id")
+
+  @@index([started_at])
+  @@index([machine_id, started_at])
 }
 
 /// Phase 1. One hourly line of the log sheet. Briquette tons = the 1-minute weight x running time, until the next weighing.
@@ -302,6 +320,9 @@ model log_reading {
   machine_id_rel machine @relation("log_reading_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
   run_id_rel machine_run? @relation("log_reading_run_id", fields: [run_id], references: [id], onDelete: Restrict)
   by_rel person @relation("log_reading_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([at])
+  @@index([machine_id, at])
 }
 
 /// Phase 1. Pellet mill greasing once a shift, in seconds.
@@ -314,6 +335,8 @@ model greasing_check {
   at DateTime @db.Timestamptz(6)
   machine_id_rel machine @relation("greasing_check_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
   by_rel person @relation("greasing_check_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([at])
 }
 
 /// Phase 1. Pellet bags counted into the store every few hours. Pellet tons = bags x kg per bag.
@@ -328,6 +351,8 @@ model bag_count {
   entered_at DateTime @db.Timestamptz(6)
   product_id_rel material @relation("bag_count_product_id", fields: [product_id], references: [id], onDelete: Restrict)
   entered_by_rel person @relation("bag_count_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
+
+  @@index([period_to])
 }
 
 /// Phase 1. Breakdowns, problems reported, bypasses and maintenance requests. Reported -> working on it -> fixed.
@@ -354,6 +379,9 @@ model maintenance_job {
   run_bypass_job_id_back run_bypass[] @relation("run_bypass_job_id")
   downtime_job_id_back downtime[] @relation("downtime_job_id")
   store_movement_job_id_back store_movement[] @relation("store_movement_job_id")
+
+  @@index([reported_at])
+  @@index([machine_id])
 }
 
 /// Phase 2. The maintenance plan: 51 tasks from the Andritz and FOMA manuals and the lubrication list. Due on running hours or days, whichever comes first.
@@ -387,6 +415,9 @@ model pm_done {
   task_id_rel pm_task? @relation("pm_done_task_id", fields: [task_id], references: [id], onDelete: Restrict)
   machine_id_rel machine @relation("pm_done_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
   by_rel person @relation("pm_done_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([done_at])
+  @@index([task_id, done_at])
 }
 
 /// Phase 2. Real meter readings from the machines, to correct the counted hours now and then.
@@ -398,6 +429,9 @@ model hour_meter_reading {
   by String @db.Uuid
   machine_id_rel machine @relation("hour_meter_reading_machine_id", fields: [machine_id], references: [id], onDelete: Restrict)
   by_rel person @relation("hour_meter_reading_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([at])
+  @@index([machine_id, at])
 }
 
 /// Phase 2. JCB-01, Tractor 2365, Tractor 1441.
@@ -434,6 +468,9 @@ model vehicle_session {
   job String? /// Feeding the chippers, Moving raw material...
   vehicle_id_rel vehicle @relation("vehicle_session_vehicle_id", fields: [vehicle_id], references: [id], onDelete: Restrict)
   driver_id_rel person @relation("vehicle_session_driver_id", fields: [driver_id], references: [id], onDelete: Restrict)
+
+  @@index([started_at])
+  @@index([driver_id, started_at])
 }
 
 /// Phase 2. Diesel filled, logged by the driver.
@@ -446,6 +483,9 @@ model diesel_fill {
   by String @db.Uuid
   vehicle_id_rel vehicle @relation("diesel_fill_vehicle_id", fields: [vehicle_id], references: [id], onDelete: Restrict)
   by_rel person @relation("diesel_fill_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([at])
+  @@index([vehicle_id, at])
 }
 
 /// Phase 2. Main kWh meter read every hour. kWh between readings goes into the NEA time-of-day band of that hour.
@@ -457,6 +497,8 @@ model power_reading {
   power_factor Decimal? @db.Decimal(3, 2)
   by String @db.Uuid
   by_rel person @relation("power_reading_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([at])
 }
 
 /// Phase 1. Raw materials and finished products.
@@ -526,6 +568,8 @@ model yard_batch {
   started_by_rel person? @relation("yard_batch_started_by", fields: [started_by], references: [id], onDelete: Restrict)
   finished_by_rel person? @relation("yard_batch_finished_by", fields: [finished_by], references: [id], onDelete: Restrict)
   weigh_ticket_batch_id_back weigh_ticket[] @relation("weigh_ticket_batch_id")
+
+  @@index([opened_at])
 }
 
 /// Phase 1. One truck at the weighbridge, weighed twice, in kg. In: first = gross, second = tare. Out (sale): first = tare, second = gross.
@@ -562,6 +606,9 @@ model weigh_ticket {
   out_by_rel person? @relation("weigh_ticket_out_by", fields: [out_by], references: [id], onDelete: Restrict)
   sales_bill_ticket_id_back sales_bill? @relation("sales_bill_ticket_id")
   lab_test_ticket_id_back lab_test[] @relation("lab_test_ticket_id")
+
+  @@index([first_at])
+  @@index([direction, first_at])
 }
 
 /// Phase 1. Stock in the store when records start. Stock now = opening + made - sold (worked out, not stored).
@@ -613,6 +660,8 @@ model store_movement {
   job_id_rel maintenance_job? @relation("store_movement_job_id", fields: [job_id], references: [id], onDelete: Restrict)
   task_id_rel pm_task? @relation("store_movement_task_id", fields: [task_id], references: [id], onDelete: Restrict)
   pr_id_rel purchase_request? @relation("store_movement_pr_id", fields: [pr_id], references: [id], onDelete: Restrict)
+
+  @@index([at])
 }
 
 /// Phase 2. Anyone asks for something the factory needs. Requested -> approved or rejected -> ordered -> received.
@@ -641,6 +690,9 @@ model purchase_request {
   received_by_rel person? @relation("purchase_request_received_by", fields: [received_by], references: [id], onDelete: Restrict)
   store_movement_pr_id_back store_movement[] @relation("store_movement_pr_id")
   purchase_request_line_pr_id_back purchase_request_line[] @relation("purchase_request_line_pr_id")
+
+  @@index([requested_at])
+  @@index([status])
 }
 
 /// Phase 2. Items on a request: a store item or anything written in.
@@ -653,6 +705,8 @@ model purchase_request_line {
   unit String?
   pr_id_rel purchase_request @relation("purchase_request_line_pr_id", fields: [pr_id], references: [id], onDelete: Restrict)
   item_id_rel store_item? @relation("purchase_request_line_item_id", fields: [item_id], references: [id], onDelete: Restrict)
+
+  @@index([pr_id])
 }
 
 /// Phase 1. One-off values: company name, address, PAN/VAT, phone, moisture deduction rule, daily targets.
@@ -684,6 +738,9 @@ model audit_log {
   by String @db.Uuid
   at DateTime @db.Timestamptz(6)
   by_rel person @relation("audit_log_by", fields: [by], references: [id], onDelete: Restrict)
+
+  @@index([table_name, record_id])
+  @@index([at])
 }
 
 /// Phase 3. The bill from the printed bill book, entered here: same no. as the challan. A cash bill counts as paid.
@@ -704,6 +761,9 @@ model sales_bill {
   ticket_id_rel weigh_ticket @relation("sales_bill_ticket_id", fields: [ticket_id], references: [id], onDelete: Restrict)
   entered_by_rel person @relation("sales_bill_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
   changed_by_rel person? @relation("sales_bill_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+
+  @@index([ticket_id])
+  @@index([bill_date])
 }
 
 /// Phase 3. Money paid to suppliers and received from buyers.
@@ -724,6 +784,8 @@ model payment {
   buyer_id_rel buyer? @relation("payment_buyer_id", fields: [buyer_id], references: [id], onDelete: Restrict)
   entered_by_rel person @relation("payment_entered_by", fields: [entered_by], references: [id], onDelete: Restrict)
   changed_by_rel person? @relation("payment_changed_by", fields: [changed_by], references: [id], onDelete: Restrict)
+
+  @@index([at])
 }
 
 /// Phase 3. What we pay per kg of raw material, for all suppliers or one supplier, from a date.
@@ -796,4 +858,6 @@ model lab_test {
   ash_left_g Decimal? @db.Decimal(8, 3)
   ash_pct Decimal? @db.Decimal(4, 1)
   ticket_id_rel weigh_ticket @relation("lab_test_ticket_id", fields: [ticket_id], references: [id], onDelete: Restrict)
+
+  @@index([ticket_id])
 }
