@@ -54,6 +54,47 @@
    "pin_hash": {
     "type": "text",
     "opt": true
+   },
+   "email": {
+    "type": "text",
+    "opt": true
+   },
+   "token_version": {
+    "type": "int",
+    "opt": false
+   }
+  }
+ },
+ "pin_reset": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "token_hash": {
+    "type": "text",
+    "opt": false
+   },
+   "expires_at": {
+    "type": "ts",
+    "opt": false
+   },
+   "used_at": {
+    "type": "ts",
+    "opt": true
+   },
+   "created_at": {
+    "type": "ts",
+    "opt": false
    }
   }
  },

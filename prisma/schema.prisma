@@ -26,10 +26,13 @@ model person {
   checked_by String? @db.Uuid /// Supervisor who confirmed them
   checked_at DateTime? @db.Timestamptz(6)
   pin_hash String? /// Phone sign-in PIN, hashed
+  email String? @unique /// For PIN reset by email (Owner and Managers). Lower case. Never sent to the apps
+  token_version Int @default(0) /// Goes up when the PIN changes, which signs the person out everywhere. Never sent to the apps
   registered_by_rel person? @relation("person_registered_by", fields: [registered_by], references: [id], onDelete: Restrict)
   checked_by_rel person? @relation("person_checked_by", fields: [checked_by], references: [id], onDelete: Restrict)
   person_registered_by_back person[] @relation("person_registered_by")
   person_checked_by_back person[] @relation("person_checked_by")
+  pin_reset_person_id_back pin_reset[] @relation("pin_reset_person_id")
   person_role_person_id_back person_role[] @relation("person_role_person_id")
   operator_machine_person_id_back operator_machine[] @relation("operator_machine_person_id")
   attendance_person_id_back attendance[] @relation("attendance_person_id")
@@ -74,6 +77,17 @@ model person {
   sales_bill_changed_by_back sales_bill[] @relation("sales_bill_changed_by")
   payment_entered_by_back payment[] @relation("payment_entered_by")
   payment_changed_by_back payment[] @relation("payment_changed_by")
+}
+
+/// Phase 1. A PIN reset link sent by email. Only a hash of the token is kept; it works once, for 20 minutes.
+model pin_reset {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id String @db.Uuid
+  token_hash String @unique /// SHA-256 of the random token in the link
+  expires_at DateTime @db.Timestamptz(6)
+  used_at DateTime? @db.Timestamptz(6) /// Set when the link is used; a used link never works again
+  created_at DateTime @db.Timestamptz(6)
+  person_id_rel person @relation("pin_reset_person_id", fields: [person_id], references: [id], onDelete: Restrict)
 }
 
 /// Phase 1. The jobs a person has. One person can have several. Roles decide which screens they can open.

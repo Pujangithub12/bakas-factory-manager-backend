@@ -87,8 +87,8 @@ syncRouter.get("/sync/pull", async (req, res) => {
   const data: Record<string, unknown[]> = {};
   const db = prisma as unknown as Record<string, { findMany(a?: object): Promise<unknown[]> }>;
   await Promise.all([
-    // pin_hash never leaves the server
-    prisma.person.findMany({ omit: { pin_hash: true } }).then((r) => (data.person = r)),
+    // pin_hash, email and token_version never leave the server
+    prisma.person.findMany({ omit: { pin_hash: true, email: true, token_version: true } }).then((r) => (data.person = r)),
     ...REFERENCE.map((t) => db[t].findMany().then((r) => (data[t] = r))),
     ...Object.entries(windowed).map(([t, where]) => db[t].findMany({ where }).then((r) => (data[t] = r))),
     prisma.store_item.findMany({ omit: owner ? {} : { rate: true } }).then((r) => (data.store_item = r)),
@@ -144,6 +144,7 @@ const WRITE: Record<string, Rule> = {
   person: { roles: [...GATE] },
   person_role: { roles: [...GATE], del: true }, // a supervisor can correct a worker's role (see the delete check below)
   operator_machine: { roles: [], del: true },
+  driver_vehicle: { roles: [], del: true }, // a supervisor ticks which vehicles a driver may drive
   attendance: { roles: [...GATE] },
   shift_in_charge: { roles: [] },
   machine_run: { roles: [...FIELD_STAFF] },
@@ -245,6 +246,7 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
   const unknown = Object.keys(op.data).filter((k) => !t.cols[k]);
   if (unknown.length) throw new Reject(`Unknown column ${unknown.join(", ")}`);
   if (op.table === "person" && "pin_hash" in op.data) throw new Reject("PIN is set from the PIN screen");
+  if (op.table === "person" && ("email" in op.data || "token_version" in op.data)) throw new Reject("Email is set from the PIN screen");
 
   const where = whereOf(t, op.data);
 

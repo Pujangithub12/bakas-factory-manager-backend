@@ -17,6 +17,15 @@ registered_at ts opt
 checked_by uuid opt fk:person | Supervisor who confirmed them
 checked_at ts opt
 pin_hash text opt | Phone sign-in PIN, hashed
+email text opt uq | For PIN reset by email (Owner and Managers). Lower case. Never sent to the apps
+token_version int def:0 | Goes up when the PIN changes, which signs the person out everywhere. Never sent to the apps
+## 1 pin_reset | A PIN reset link sent by email. Only a hash of the token is kept; it works once, for 20 minutes.
+id uuid pk
+person_id uuid fk:person
+token_hash text uq | SHA-256 of the random token in the link
+expires_at ts
+used_at ts opt | Set when the link is used; a used link never works again
+created_at ts
 ## 1 person_role | The jobs a person has. One person can have several. Roles decide which screens they can open.
 person_id uuid pk fk:person
 role text pk | Owner (super admin), Manager (admin), Supervisor, Operator, Driver, Security, Fitter, Store, Weighbridge
