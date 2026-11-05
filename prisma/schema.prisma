@@ -123,19 +123,19 @@ model shift {
   shift_in_charge_shift_id_back shift_in_charge[] @relation("shift_in_charge_shift_id")
 }
 
-/// Phase 1. Gate in and out by security, on duty by the supervisor. Belongs to the shift it is for.
+/// Phase 1. Gate in and out by security, on duty by the supervisor. Belongs to the shift it is for, when shifts are set up.
 model attendance {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   person_id String @db.Uuid
-  shift_id String @db.Uuid
-  shift_start DateTime @db.Timestamptz(6) /// Start of that shift
+  shift_id String? @db.Uuid /// Empty when the guard checked someone in while no shift was set up
+  shift_start DateTime @db.Timestamptz(6) /// Start of that shift, or the time of gate in when there was no shift
   gate_in DateTime? @db.Timestamptz(6)
   gate_out DateTime? @db.Timestamptz(6) /// Empty while on site
   gate_by String? @db.Uuid /// Security guard
   on_duty_at DateTime? @db.Timestamptz(6) /// When the supervisor marked them working
   on_duty_by String? @db.Uuid
   person_id_rel person @relation("attendance_person_id", fields: [person_id], references: [id], onDelete: Restrict)
-  shift_id_rel shift @relation("attendance_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
+  shift_id_rel shift? @relation("attendance_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
   gate_by_rel person? @relation("attendance_gate_by", fields: [gate_by], references: [id], onDelete: Restrict)
   on_duty_by_rel person? @relation("attendance_on_duty_by", fields: [on_duty_by], references: [id], onDelete: Restrict)
 

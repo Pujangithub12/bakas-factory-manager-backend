@@ -38,11 +38,11 @@ id uuid pk
 name text
 starts time
 ends time
-## 1 attendance | Gate in and out by security, on duty by the supervisor. Belongs to the shift it is for.
+## 1 attendance | Gate in and out by security, on duty by the supervisor. Belongs to the shift it is for, when shifts are set up.
 id uuid pk
 person_id uuid fk:person
-shift_id uuid fk:shift
-shift_start ts | Start of that shift
+shift_id uuid opt fk:shift | Empty when the guard checked someone in while no shift was set up
+shift_start ts | Start of that shift, or the time of gate in when there was no shift
 gate_in ts opt
 gate_out ts opt | Empty while on site
 gate_by uuid opt fk:person | Security guard

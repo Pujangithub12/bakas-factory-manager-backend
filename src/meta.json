@@ -180,7 +180,7 @@
    },
    "shift_id": {
     "type": "uuid",
-    "opt": false,
+    "opt": true,
     "fk": "shift"
    },
    "shift_start": {
