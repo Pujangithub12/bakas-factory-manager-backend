@@ -146,11 +146,11 @@ model attendance {
 /// Phase 1. Who is in charge of each shift. At night it changes as needed.
 model shift_in_charge {
   shift_start DateTime @id @db.Timestamptz(6)
-  shift_id String @db.Uuid
+  shift_id String? @db.Uuid /// Empty when no shifts are set up and the built-in Day and Night are used
   person_id String @db.Uuid /// Supervisor, manager, operator, fitter or electrician
   set_by String @db.Uuid
   set_at DateTime @db.Timestamptz(6)
-  shift_id_rel shift @relation("shift_in_charge_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
+  shift_id_rel shift? @relation("shift_in_charge_shift_id", fields: [shift_id], references: [id], onDelete: Restrict)
   person_id_rel person @relation("shift_in_charge_person_id", fields: [person_id], references: [id], onDelete: Restrict)
   set_by_rel person @relation("shift_in_charge_set_by", fields: [set_by], references: [id], onDelete: Restrict)
 

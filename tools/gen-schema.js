@@ -50,7 +50,7 @@ on_duty_at ts opt | When the supervisor marked them working
 on_duty_by uuid opt fk:person
 ## 1 shift_in_charge | Who is in charge of each shift. At night it changes as needed.
 shift_start ts pk
-shift_id uuid fk:shift
+shift_id uuid opt fk:shift | Empty when no shifts are set up and the built-in Day and Night are used
 person_id uuid fk:person | Supervisor, manager, operator, fitter or electrician
 set_by uuid fk:person
 set_at ts
