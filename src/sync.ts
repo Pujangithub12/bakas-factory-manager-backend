@@ -176,7 +176,6 @@ const WRITE: Record<string, Rule> = {
   supplier: { roles: [...WEIGH] },
   buyer: { roles: [...WEIGH] },
   // Phase 2. Anyone on a phone may ask for something; the other rules are checked in applyOp.
-  driver_vehicle: { roles: [], del: true }, // the supervisor ticks which vehicles each driver may drive
   vehicle_session: { roles: ["Driver"] },
   diesel_fill: { roles: ["Driver"] },
   hour_meter_reading: { roles: [...FIELD_STAFF] },
