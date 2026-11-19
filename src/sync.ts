@@ -160,7 +160,7 @@ const WRITE: Record<string, Rule> = {
   person_role: { roles: [...GATE], del: true }, // a supervisor can correct a worker's role (see the delete check below)
   operator_machine: { roles: [], del: true },
   driver_vehicle: { roles: [], del: true }, // a supervisor ticks which vehicles a driver may drive
-  attendance: { roles: [...GATE] },
+  attendance: { roles: [...GATE], del: true }, // a guard can cancel a mistaken check-in (see the delete check below)
   shift_in_charge: { roles: [] },
   machine_run: { roles: [...FIELD_STAFF] },
   run_helper: { roles: [...FIELD_STAFF] },
@@ -311,6 +311,11 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       if (!old) return;
       if (op.table === "person_role" && !isMgmt) throw new Reject("Only the supervisor can change roles");
       if (op.table === "log_reading" && !isMgmt && old.by !== who.id) throw new Reject("You can delete only your own reading");
+      // A check-in that is checked out again within 3 minutes is removed, not saved. Only the person who made it, while it is
+      // still open and nobody has marked them on duty. (The 3 minutes are kept on the phone, which may send this later with no signal.)
+      if (op.table === "attendance" && !admin && (old.gate_by !== who.id || old.gate_out || old.on_duty_at)) {
+        throw new Reject("A check-in can be cancelled only by the guard who made it, before check-out and before the person is marked on duty");
+      }
       await d.delete({ where });
       await tx.audit_log.create({
         data: { table_name: op.table, record_id: recordId(t, old), action: "delete", old_values: plain(logged(op.table, old)), by: who.id, at: new Date() },
