@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Counters } from "../src/limits";
 import { canManage, rank, roleChangeError } from "../src/roles";
+import { dayWindow, markDay, markWindowError, productionDay } from "../src/marks";
 
 test("roles: only the Owner makes a Manager, nobody gives the Owner role", () => {
   assert.match(roleChangeError(["Manager"], "Manager") ?? "", /Only the Owner/);
@@ -19,6 +20,25 @@ test("roles: you manage yourself and people below you, never above", () => {
   assert.equal(canManage("a", ["Supervisor"], "b", ["Manager"]), false);
   assert.equal(canManage("a", ["Manager"], "b", ["Manager"]), false);
   assert.equal(canManage("a", ["Owner"], "b", ["Manager"]), true);
+});
+
+test("attendance: the production day runs 06:00 to 06:00 Nepal time", () => {
+  assert.equal(productionDay(new Date("2026-11-23T00:14:00Z")), "2026-11-22"); // 05:59 Nepal
+  assert.equal(productionDay(new Date("2026-11-23T00:15:00Z")), "2026-11-23"); // 06:00 Nepal
+  assert.equal(dayWindow("2026-11-23").from.toISOString(), "2026-11-23T00:15:00.000Z");
+  assert.equal(markDay("2026-02-30"), null);
+  assert.equal(markDay("2026-11-23"), "2026-11-23");
+});
+
+test("attendance: Supervisor 1 day back, Manager 7, Owner any, nobody the future", () => {
+  const now = new Date("2026-11-23T06:00:00Z");
+  assert.equal(markWindowError(["Supervisor"], "2026-11-22", now), null);
+  assert.match(markWindowError(["Supervisor"], "2026-11-21", now) ?? "", /today and yesterday/);
+  assert.equal(markWindowError(["Manager"], "2026-11-16", now), null);
+  assert.match(markWindowError(["Manager"], "2026-11-15", now) ?? "", /last 7 days/);
+  assert.equal(markWindowError(["Owner"], "2025-01-01", now), null);
+  assert.match(markWindowError(["Owner"], "2026-11-24", now) ?? "", /future/);
+  assert.match(markWindowError(["Security"], "2026-11-23", now) ?? "", /Only a Supervisor/);
 });
 
 test("limits: locks after the allowed failures, and clear lets the key try again", () => {

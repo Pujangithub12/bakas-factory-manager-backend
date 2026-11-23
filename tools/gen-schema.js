@@ -48,6 +48,13 @@ gate_out ts opt | Empty while on site
 gate_by uuid opt fk:person | Security guard
 on_duty_at ts opt | When the supervisor marked them working
 on_duty_by uuid opt fk:person
+## 1 attendance_mark | Attendance sheet: a mark made by a Supervisor, Manager or the Owner. It wins over the gate. Present from the gate is not stored here.
+person_id uuid pk fk:person
+day date pk | Production day (06:00 to 06:00 Nepal time). A person works one shift a day
+status text | Present, Half day, Absent, Leave, Off
+note text opt | Reason, required when it changes what the gate recorded
+marked_by uuid fk:person
+marked_at ts
 ## 1 shift_in_charge | Who is in charge of each shift. At night it changes as needed.
 shift_start ts pk
 shift_id uuid opt fk:shift | Empty when no shifts are set up and the built-in Day and Night are used
@@ -471,6 +478,7 @@ const INDEXES = {
   person_role: [["role"]],
   shift_in_charge: [["person_id", "shift_start"]],
   attendance: [["shift_start"], ["person_id", "shift_start"]],
+  attendance_mark: [["day"]],
   machine_run: [["started_at"], ["operator_id", "stopped_at"], ["machine_id", "started_at"]],
   run_helper: [["person_id"]],
   downtime: [["started_at"], ["machine_id", "started_at"]],
@@ -534,7 +542,7 @@ datasource db {
   provider = "postgresql"
 }
 
-// Generated from the "Factory database map" (50 tables). Table and column names
+// Generated from the "Factory database map" (50 tables, plus attendance_mark). Table and column names
 // match the map exactly. Phase 1 = gate, weighbridge, machines, production;
 // Phase 2 = maintenance plan, store, vehicles, electricity; Phase 3 = money, lab, planning.
 // Columns marked "Rs" are owner and accountant only - enforce that in the API.

@@ -211,6 +211,41 @@
    }
   }
  },
+ "attendance_mark": {
+  "phase": 1,
+  "pk": [
+   "person_id",
+   "day"
+  ],
+  "cols": {
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "day": {
+    "type": "date",
+    "opt": false
+   },
+   "status": {
+    "type": "text",
+    "opt": false
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   },
+   "marked_by": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "marked_at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
  "shift_in_charge": {
   "phase": 1,
   "pk": [

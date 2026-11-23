@@ -7,7 +7,7 @@ datasource db {
   provider = "postgresql"
 }
 
-// Generated from the "Factory database map" (50 tables). Table and column names
+// Generated from the "Factory database map" (50 tables, plus attendance_mark). Table and column names
 // match the map exactly. Phase 1 = gate, weighbridge, machines, production;
 // Phase 2 = maintenance plan, store, vehicles, electricity; Phase 3 = money, lab, planning.
 // Columns marked "Rs" are owner and accountant only - enforce that in the API.
@@ -38,6 +38,8 @@ model person {
   attendance_person_id_back attendance[] @relation("attendance_person_id")
   attendance_gate_by_back attendance[] @relation("attendance_gate_by")
   attendance_on_duty_by_back attendance[] @relation("attendance_on_duty_by")
+  attendance_mark_person_id_back attendance_mark[] @relation("attendance_mark_person_id")
+  attendance_mark_marked_by_back attendance_mark[] @relation("attendance_mark_marked_by")
   shift_in_charge_person_id_back shift_in_charge[] @relation("shift_in_charge_person_id")
   shift_in_charge_set_by_back shift_in_charge[] @relation("shift_in_charge_set_by")
   visitor_meet_person_id_back visitor[] @relation("visitor_meet_person_id")
@@ -141,6 +143,21 @@ model attendance {
 
   @@index([shift_start])
   @@index([person_id, shift_start])
+}
+
+/// Phase 1. Attendance sheet: a mark made by a Supervisor, Manager or the Owner. It wins over the gate. Present from the gate is not stored here.
+model attendance_mark {
+  person_id String @db.Uuid
+  day DateTime @db.Date /// Production day (06:00 to 06:00 Nepal time). A person works one shift a day
+  status String /// Present, Half day, Absent, Leave, Off
+  note String? /// Reason, required when it changes what the gate recorded
+  marked_by String @db.Uuid
+  marked_at DateTime @db.Timestamptz(6)
+  person_id_rel person @relation("attendance_mark_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+  marked_by_rel person @relation("attendance_mark_marked_by", fields: [marked_by], references: [id], onDelete: Restrict)
+
+  @@id([person_id, day])
+  @@index([day])
 }
 
 /// Phase 1. Who is in charge of each shift. At night it changes as needed.

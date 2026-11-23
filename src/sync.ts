@@ -4,6 +4,7 @@ import { Prisma } from "./generated/prisma/client";
 import { prisma } from "./prisma";
 import { requireAuth, requireRole, MANAGEMENT } from "./auth";
 import { canManage, isAdmin, roleChangeError } from "./roles";
+import { MARK_STATUSES, dayWindow, markDay, markWindowError } from "./marks";
 import meta from "./meta.json";
 
 type TableMeta = { phase: number; pk: string[]; cols: Record<string, { type: string; opt: boolean; fk?: string }> };
@@ -98,6 +99,15 @@ syncRouter.get("/sync/pull", async (req, res) => {
     prisma.store_item.findMany({ omit: owner ? {} : { rate: true } }).then((r) => (data.store_item = r)),
     prisma.moisture_standard.findMany().then((r) => (data.moisture_standard = r)),
     prisma.setting.findMany({ where: owner ? {} : { key: { notIn: OWNER_SETTINGS } } }).then((r) => (data.setting = r)),
+    // Attendance marks: management sees everyone's, anyone else only their own. Until the table is created on the live
+    // database this answers with none, so a backend deployed first does not stop every phone from syncing.
+    prisma.attendance_mark
+      .findMany({ where: { day: { gte: since }, ...(mgmt ? {} : { person_id: me }) } })
+      .then((r) => (data.attendance_mark = r.map((m) => ({ ...m, day: m.day.toISOString().slice(0, 10) }))))
+      .catch((e) => {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2021") data.attendance_mark = [];
+        else throw e;
+      }),
     ...moneyReads(),
   ]);
   // The maintenance plan and the hour meter need the latest entry however long ago it was made.
@@ -161,6 +171,7 @@ const WRITE: Record<string, Rule> = {
   operator_machine: { roles: [], del: true },
   driver_vehicle: { roles: [], del: true }, // a supervisor ticks which vehicles a driver may drive
   attendance: { roles: [...GATE], del: true }, // a guard can cancel a mistaken check-in (see the delete check below)
+  attendance_mark: { roles: [], del: true }, // Supervisor, Manager, Owner, within their days (marks.ts). Removing a mark goes back to the gate
   shift_in_charge: { roles: [] },
   machine_run: { roles: [...FIELD_STAFF] },
   run_helper: { roles: [...FIELD_STAFF] },
@@ -300,6 +311,23 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
   if (op.table === "person" && "pin_hash" in op.data) throw new Reject("PIN is set from the PIN screen");
   if (op.table === "person" && ("email" in op.data || "token_version" in op.data)) throw new Reject("Email is set from the PIN screen");
 
+  // The attendance sheet: which days this person may mark, and a clean status. Who and when are set here, not by the phone.
+  if (op.table === "attendance_mark") {
+    const day = markDay(op.data.day);
+    if (!day) throw new Reject("Bad date");
+    op.data.day = day;
+    const err = markWindowError(who.roles, day);
+    if (err) throw new Reject(err);
+    if (op.op === "upsert") {
+      if (!MARK_STATUSES.includes(String(op.data.status))) throw new Reject("Choose Present, Half day, Absent, Leave or Off");
+      const note = typeof op.data.note === "string" ? op.data.note.trim() : "";
+      if (note.length > 200) throw new Reject("Keep the reason under 200 letters");
+      op.data.note = note || null;
+      op.data.marked_by = who.id;
+      op.data.marked_at = new Date().toISOString();
+    }
+  }
+
   const where = whereOf(t, op.data);
 
   await prisma.$transaction(async (tx) => {
@@ -323,6 +351,12 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
       return;
     }
 
+    // Changing what the gate recorded needs a reason.
+    if (op.table === "attendance_mark" && op.data.status !== "Present" && !op.data.note) {
+      const { from, to } = dayWindow(String(op.data.day));
+      const came = await tx.attendance.findFirst({ where: { person_id: String(op.data.person_id), gate_in: { not: null }, shift_start: { gte: from, lt: to } }, select: { id: true } });
+      if (came) throw new Reject("The gate shows this person came in. Give a reason for changing it");
+    }
     if (op.table === "log_reading" && old && !isMgmt && old.by !== who.id) throw new Reject("You can change only your own reading");
     // A guard registers a new worker with a role. Giving a role to someone already confirmed (or to the guard themselves) is for the supervisor.
     if (op.table === "person_role" && !old && !isMgmt) {
