@@ -4,7 +4,7 @@ import { Prisma } from "./generated/prisma/client";
 import { prisma } from "./prisma";
 import { requireAuth, requireRole, MANAGEMENT } from "./auth";
 import { canManage, isAdmin, roleChangeError } from "./roles";
-import { MARK_STATUSES, dayWindow, markDay, markWindowError } from "./marks";
+import { ATT_ACCESS_KEY, MARK_STATUSES, accessFrom, accessListError, dayWindow, markDay, markWindowError } from "./marks";
 import meta from "./meta.json";
 
 type TableMeta = { phase: number; pk: string[]; cols: Record<string, { type: string; opt: boolean; fk?: string }> };
@@ -24,6 +24,12 @@ const REFERENCE = [
 const PR_OPEN = ["Requested", "Approved", "Ordered"];
 /** Settings only the Owner may read or change. */
 const OWNER_SETTINGS = ["diesel_rate"];
+
+/** What this person may do with the attendance sheet, from the Owner's access list. */
+async function attendanceAccessOf(who: { id: string; roles: string[] }) {
+  const s = await prisma.setting.findUnique({ where: { key: ATT_ACCESS_KEY }, select: { value: true } });
+  return accessFrom(s?.value, who.id, who.roles);
+}
 
 export const syncRouter = Router();
 syncRouter.use(requireAuth);
@@ -90,6 +96,7 @@ syncRouter.get("/sync/pull", async (req, res) => {
   };
 
   const data: Record<string, unknown[]> = {};
+  const seesSheet = (await attendanceAccessOf(req.auth!)) !== "none";
   const db = prisma as unknown as Record<string, { findMany(a?: object): Promise<unknown[]> }>;
   await Promise.all([
     // pin_hash, email and token_version never leave the server. ID numbers and addresses go only to those who register and confirm workers.
@@ -99,10 +106,10 @@ syncRouter.get("/sync/pull", async (req, res) => {
     prisma.store_item.findMany({ omit: owner ? {} : { rate: true } }).then((r) => (data.store_item = r)),
     prisma.moisture_standard.findMany().then((r) => (data.moisture_standard = r)),
     prisma.setting.findMany({ where: owner ? {} : { key: { notIn: OWNER_SETTINGS } } }).then((r) => (data.setting = r)),
-    // Attendance marks: management sees everyone's, anyone else only their own. Until the table is created on the live
+    // Attendance marks: everyone's for those the Owner lets see the sheet, otherwise only their own. Until the table is created on the live
     // database this answers with none, so a backend deployed first does not stop every phone from syncing.
     prisma.attendance_mark
-      .findMany({ where: { day: { gte: since }, ...(mgmt ? {} : { person_id: me }) } })
+      .findMany({ where: { day: { gte: since }, ...(seesSheet ? {} : { person_id: me }) } })
       .then((r) => (data.attendance_mark = r.map((m) => ({ ...m, day: m.day.toISOString().slice(0, 10) }))))
       .catch((e) => {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2021") data.attendance_mark = [];
@@ -293,12 +300,20 @@ const REMOVABLE = new Set(["person_role", "operator_machine", "driver_vehicle"])
 async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[] }, admin = false) {
   const t = own(TABLES, op.table);
   const rule = own(WRITE, op.table);
-  if (!t || (!rule && !(admin && SETUP.has(op.table)))) throw new Reject(`${op.table} cannot be changed from here`);
+  // The attendance access list is the one setting the Owner may also save from the phone (only the Owner: checked below).
+  const accessList = op.table === "setting" && op.data.key === ATT_ACCESS_KEY;
+  if (!t || (!rule && !(admin && SETUP.has(op.table)) && !accessList)) throw new Reject(`${op.table} cannot be changed from here`);
   // The admin route is already limited to Owner and Manager; it may correct any Phase 1 table.
-  if (!admin && !who.roles.some((r) => MANAGEMENT.includes(r) || rule!.roles.includes(r))) throw new Reject("Not allowed");
+  // The attendance sheet goes by the Owner's access list instead of roles (checked below).
+  if (!admin && op.table !== "attendance_mark" && !who.roles.some((r) => MANAGEMENT.includes(r) || rule!.roles.includes(r))) throw new Reject("Not allowed");
   if (op.op === "delete" && !(rule?.del || (admin && REMOVABLE.has(op.table)))) throw new Reject("Nothing is deleted; correct it instead");
   if (OWNER_ONLY.has(op.table) && !who.roles.includes("Owner")) throw new Reject("Only the Owner sets prices and rates");
   if (op.table === "setting" && OWNER_SETTINGS.includes(String(op.data.key)) && !who.roles.includes("Owner")) throw new Reject("Only the Owner changes this");
+  if (op.table === "setting" && op.data.key === ATT_ACCESS_KEY) {
+    if (!who.roles.includes("Owner")) throw new Reject("Only the Owner decides who sees the attendance sheet");
+    const err = op.op === "delete" ? null : accessListError(op.data.value);
+    if (err) throw new Reject(err);
+  }
   if (MONEY_ENTRY.has(op.table) && !isAdmin(who.roles)) throw new Reject("Only the Owner or a Manager enters bills and payments");
   // Giving or taking away a role: who may do it depends on the role (see roles.ts).
   if (op.table === "person_role") {
@@ -316,7 +331,7 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
     const day = markDay(op.data.day);
     if (!day) throw new Reject("Bad date");
     op.data.day = day;
-    const err = markWindowError(who.roles, day);
+    const err = markWindowError(who.roles, day, new Date(), await attendanceAccessOf(who));
     if (err) throw new Reject(err);
     if (op.op === "upsert") {
       if (!MARK_STATUSES.includes(String(op.data.status))) throw new Reject("Choose Present, Half day, Absent, Leave or Off");

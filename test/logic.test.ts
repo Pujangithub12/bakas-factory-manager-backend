@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Counters } from "../src/limits";
 import { canManage, rank, roleChangeError } from "../src/roles";
-import { dayWindow, markDay, markWindowError, productionDay } from "../src/marks";
+import { accessFrom, accessListError, dayWindow, markDay, markWindowError, productionDay } from "../src/marks";
 
 test("roles: only the Owner makes a Manager, nobody gives the Owner role", () => {
   assert.match(roleChangeError(["Manager"], "Manager") ?? "", /Only the Owner/);
@@ -38,7 +38,25 @@ test("attendance: Supervisor 1 day back, Manager 7, Owner any, nobody the future
   assert.match(markWindowError(["Manager"], "2026-11-15", now) ?? "", /last 7 days/);
   assert.equal(markWindowError(["Owner"], "2025-01-01", now), null);
   assert.match(markWindowError(["Owner"], "2026-11-24", now) ?? "", /future/);
-  assert.match(markWindowError(["Security"], "2026-11-23", now) ?? "", /Only a Supervisor/);
+  assert.match(markWindowError(["Security"], "2026-11-23", now, "view") ?? "", /do not have access/);
+  assert.equal(markWindowError(["Store"], "2026-11-22", now, "edit"), null);
+  assert.match(markWindowError(["Store"], "2026-11-21", now, "edit") ?? "", /today and yesterday/);
+});
+
+test("attendance access: the Owner always, the list next, then the role", () => {
+  const id = "3f2a1c4e-0000-4000-8000-000000000001";
+  assert.equal(accessFrom(null, id, ["Owner"]), "edit");
+  assert.equal(accessFrom({ [id]: "none" }, id, ["Owner"]), "edit");
+  assert.equal(accessFrom(null, id, ["Manager"]), "edit");
+  assert.equal(accessFrom({ [id]: "view" }, id, ["Manager"]), "view");
+  assert.equal(accessFrom({ [id]: "none" }, id, ["Supervisor"]), "none");
+  assert.equal(accessFrom(null, id, ["Store"]), "none");
+  assert.equal(accessFrom({ [id]: "edit" }, id, ["Store"]), "edit");
+  assert.equal(accessFrom({ [id]: "admin" }, id, ["Store"]), "none");
+  assert.equal(accessListError({ [id]: "view" }), null);
+  assert.ok(accessListError({ [id]: "admin" }));
+  assert.ok(accessListError({ "not-an-id": "view" }));
+  assert.ok(accessListError(["view"]));
 });
 
 test("limits: locks after the allowed failures, and clear lets the key try again", () => {

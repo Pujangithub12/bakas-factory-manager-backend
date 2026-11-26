@@ -22,20 +22,42 @@ export function markDay(v: unknown): string | null {
   return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : null;
 }
 
-/** How many days back this person may mark: the Owner any day, a Manager 7, a Supervisor the previous day. */
+/** Setting key: who may see or mark the sheet, set by the Owner. { person id: "none" | "view" | "edit" }. */
+export const ATT_ACCESS_KEY = "attendance_access";
+export const ATT_LEVELS = ["none", "view", "edit"] as const;
+export type AttAccess = (typeof ATT_LEVELS)[number];
+
+/** The Owner always marks. Anyone else: what the Owner set for them, otherwise Manager and Supervisor mark and the rest have no access. */
+export function accessFrom(list: unknown, personId: string, roles: string[]): AttAccess {
+  if (roles.includes("Owner")) return "edit";
+  const set = list && typeof list === "object" && !Array.isArray(list) ? (list as Record<string, unknown>)[personId] : undefined;
+  if ((ATT_LEVELS as readonly unknown[]).includes(set)) return set as AttAccess;
+  return roles.includes("Manager") || roles.includes("Supervisor") ? "edit" : "none";
+}
+
+/** Checks the access list the Owner saves. Returns why it is refused, or null. */
+export function accessListError(v: unknown): string | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "Bad access list";
+  const entries = Object.entries(v as Record<string, unknown>);
+  if (entries.length > 2000) return "Bad access list";
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const [k, x] of entries) if (!uuid.test(k) || !(ATT_LEVELS as readonly unknown[]).includes(x)) return "Bad access list";
+  return null;
+}
+
+/** How many days back someone who may mark can go: the Owner any day, a Manager 7, anyone else today and yesterday. */
 export function markBackDays(roles: string[]) {
   if (roles.includes("Owner")) return Infinity;
   if (roles.includes("Manager")) return 7;
-  if (roles.includes("Supervisor")) return 1;
-  return -1;
+  return 1;
 }
 
 /** Why this person may not mark this day, or null when they may. */
-export function markWindowError(roles: string[], day: string, now = new Date()): string | null {
+export function markWindowError(roles: string[], day: string, now = new Date(), access: AttAccess = "edit"): string | null {
+  if (access !== "edit") return "You do not have access to change the attendance sheet. Ask the Owner";
   const back = markBackDays(roles);
-  if (back < 0) return "Only a Supervisor, Manager or the Owner can mark attendance";
   const ago = Math.round((Date.parse(productionDay(now)) - Date.parse(day)) / DAY);
   if (ago < 0) return "Attendance cannot be marked for a future day";
-  if (ago > back) return roles.includes("Manager") ? "A Manager can mark only the last 7 days. Ask the Owner" : "A Supervisor can mark only today and yesterday. Ask a Manager";
+  if (ago > back) return roles.includes("Manager") ? "A Manager can mark only the last 7 days. Ask the Owner" : "You can mark only today and yesterday. Ask a Manager";
   return null;
 }
