@@ -55,6 +55,16 @@ status text | Present, Half day, Absent, Leave, Off
 note text opt | Reason, required when it changes what the gate recorded
 marked_by uuid fk:person
 marked_at ts
+## 1 location_ping | Where a phone was when its user did something in the app (sign in, gate check-in, start a machine). Sent only by that person's phone; seen on the laptop by the Owner. Never sent to the phones.
+id uuid pk | Made on the phone, so a ping sent twice is kept once
+person_id uuid fk:person | The signed-in person; the server sets it
+at ts | When the location was taken
+action text | What they were doing, for example Sign in or Gate check-in
+lat num9.6 opt | Empty when the phone could not give a location
+lng num9.6 opt
+accuracy_m int opt | How close the reading is, in metres
+note text opt | Why there is no location: permission off, location off, no fix
+received_at ts | When the server got it
 ## 1 shift_in_charge | Who is in charge of each shift. At night it changes as needed.
 shift_start ts pk
 shift_id uuid opt fk:shift | Empty when no shifts are set up and the built-in Day and Night are used
@@ -479,6 +489,7 @@ const INDEXES = {
   shift_in_charge: [["person_id", "shift_start"]],
   attendance: [["shift_start"], ["person_id", "shift_start"]],
   attendance_mark: [["day"]],
+  location_ping: [["at"], ["person_id", "at"]],
   machine_run: [["started_at"], ["operator_id", "stopped_at"], ["machine_id", "started_at"]],
   run_helper: [["person_id"]],
   downtime: [["started_at"], ["machine_id", "started_at"]],

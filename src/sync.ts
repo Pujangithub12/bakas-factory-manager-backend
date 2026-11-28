@@ -5,6 +5,7 @@ import { prisma } from "./prisma";
 import { requireAuth, requireRole, MANAGEMENT } from "./auth";
 import { canManage, isAdmin, roleChangeError } from "./roles";
 import { ATT_ACCESS_KEY, MARK_STATUSES, accessFrom, accessListError, dayWindow, markDay, markWindowError } from "./marks";
+import { FACTORY_KEY, factoryError } from "./locations";
 import meta from "./meta.json";
 
 type TableMeta = { phase: number; pk: string[]; cols: Record<string, { type: string; opt: boolean; fk?: string }> };
@@ -23,7 +24,7 @@ const REFERENCE = [
 
 const PR_OPEN = ["Requested", "Approved", "Ordered"];
 /** Settings only the Owner may read or change. */
-const OWNER_SETTINGS = ["diesel_rate"];
+const OWNER_SETTINGS = ["diesel_rate", FACTORY_KEY];
 
 /** What this person may do with the attendance sheet, from the Owner's access list. */
 async function attendanceAccessOf(who: { id: string; roles: string[] }) {
@@ -312,6 +313,10 @@ async function applyOp(op: z.infer<typeof Op>, who: { id: string; roles: string[
   if (op.table === "setting" && op.data.key === ATT_ACCESS_KEY) {
     if (!who.roles.includes("Owner")) throw new Reject("Only the Owner decides who sees the attendance sheet");
     const err = op.op === "delete" ? null : accessListError(op.data.value);
+    if (err) throw new Reject(err);
+  }
+  if (op.table === "setting" && op.data.key === FACTORY_KEY) {
+    const err = op.op === "delete" ? null : factoryError(op.data.value);
     if (err) throw new Reject(err);
   }
   if (MONEY_ENTRY.has(op.table) && !isAdmin(who.roles)) throw new Reject("Only the Owner or a Manager enters bills and payments");

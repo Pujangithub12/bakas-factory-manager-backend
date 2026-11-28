@@ -40,6 +40,7 @@ model person {
   attendance_on_duty_by_back attendance[] @relation("attendance_on_duty_by")
   attendance_mark_person_id_back attendance_mark[] @relation("attendance_mark_person_id")
   attendance_mark_marked_by_back attendance_mark[] @relation("attendance_mark_marked_by")
+  location_ping_person_id_back location_ping[] @relation("location_ping_person_id")
   shift_in_charge_person_id_back shift_in_charge[] @relation("shift_in_charge_person_id")
   shift_in_charge_set_by_back shift_in_charge[] @relation("shift_in_charge_set_by")
   visitor_meet_person_id_back visitor[] @relation("visitor_meet_person_id")
@@ -158,6 +159,23 @@ model attendance_mark {
 
   @@id([person_id, day])
   @@index([day])
+}
+
+/// Phase 1. Where a phone was when its user did something in the app (sign in, gate check-in, start a machine). Sent only by that person's phone; seen on the laptop by the Owner. Never sent to the phones.
+model location_ping {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid /// Made on the phone, so a ping sent twice is kept once
+  person_id String @db.Uuid /// The signed-in person; the server sets it
+  at DateTime @db.Timestamptz(6) /// When the location was taken
+  action String /// What they were doing, for example Sign in or Gate check-in
+  lat Decimal? @db.Decimal(9, 6) /// Empty when the phone could not give a location
+  lng Decimal? @db.Decimal(9, 6)
+  accuracy_m Int? /// How close the reading is, in metres
+  note String? /// Why there is no location: permission off, location off, no fix
+  received_at DateTime @db.Timestamptz(6) /// When the server got it
+  person_id_rel person @relation("location_ping_person_id", fields: [person_id], references: [id], onDelete: Restrict)
+
+  @@index([at])
+  @@index([person_id, at])
 }
 
 /// Phase 1. Who is in charge of each shift. At night it changes as needed.

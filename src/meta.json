@@ -246,6 +246,51 @@
    }
   }
  },
+ "location_ping": {
+  "phase": 1,
+  "pk": [
+   "id"
+  ],
+  "cols": {
+   "id": {
+    "type": "uuid",
+    "opt": false
+   },
+   "person_id": {
+    "type": "uuid",
+    "opt": false,
+    "fk": "person"
+   },
+   "at": {
+    "type": "ts",
+    "opt": false
+   },
+   "action": {
+    "type": "text",
+    "opt": false
+   },
+   "lat": {
+    "type": "num9.6",
+    "opt": true
+   },
+   "lng": {
+    "type": "num9.6",
+    "opt": true
+   },
+   "accuracy_m": {
+    "type": "int",
+    "opt": true
+   },
+   "note": {
+    "type": "text",
+    "opt": true
+   },
+   "received_at": {
+    "type": "ts",
+    "opt": false
+   }
+  }
+ },
  "shift_in_charge": {
   "phase": 1,
   "pk": [

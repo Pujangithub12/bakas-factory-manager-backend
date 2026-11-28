@@ -6,6 +6,7 @@ import compression from "compression";
 import { prisma } from "./prisma";
 import { authRouter } from "./auth";
 import { syncRouter } from "./sync";
+import { locationRouter } from "./locations";
 import { rateLimit } from "./limits";
 
 const app = express();
@@ -56,6 +57,7 @@ app.use(rateLimit(1200));
 
 app.use(authRouter);
 app.use(syncRouter);
+app.use(locationRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
